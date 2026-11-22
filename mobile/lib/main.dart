@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-import 'workspace.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -130,13 +128,6 @@ class _SessionGateState extends State<SessionGate> {
       );
     }
     if (!state) {
-      if (!widget.firebase && Platform.isIOS) {
-        return const Workspace(
-          path: '/login',
-          title: 'Sign in',
-          firebase: false,
-        );
-      }
       return SignIn(
         onSuccess: (_) {
           if (mounted) setState(() => signedIn = true);
