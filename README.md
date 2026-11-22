@@ -6,7 +6,7 @@ Apex Resolve gives each software issue a private Nexconn conversation, a task li
 
 An authorized independent reviewer can approve a pending resolution after inspecting evidence. The database checks the current request and excludes the requester, assigned resolver and sole evidence uploader. PostgreSQL records the decision, audit event, knowledge entry, and message-outbox entry in one transaction. The room later broadcasts that committed decision through Nexconn. Reopening a regression preserves its history and removes it from the verified knowledge base.
 
-[Judge evidence](docs/JUDGING_MATRIX.md) · [Write-up](output/pdf/Apex-Resolve-Writeup.pdf) · [Two-minute demo](output/demo/Apex-Resolve-Demo.mp4)
+[Live app](https://apex-resolve-one.vercel.app) · [Judge evidence](docs/JUDGING_MATRIX.md) · [Write-up](output/pdf/Apex-Resolve-Writeup.pdf) · [Two-minute demo](output/demo/Apex-Resolve-Demo.mp4)
 
 ## Run locally
 
@@ -42,11 +42,11 @@ npx tsc --noEmit
 
 The production build generates the Next.js route types consumed by the standalone type check. For a clean checkout without a build, run `npx next typegen` first. Browser checks use Playwright. The separate credentialed acceptance test creates real records and requires two accounts. [Browser testing](docs/BROWSER_TESTS.md)
 
-The Nexconn server API path passed live token, group, join, profile and workflow-message checks. A user screenshot shows a real issue conversation, and the user reported successful two-account sync. OpenRouter free routing has answered a live application analysis request; Gemini awaits a key. On localhost, consented analysis can use the current browser's Nexconn history when the HTTPS webhook mirror is empty. A deployed app should still configure that webhook and verify its delivery. Group typing and online presence are omitted. File upload and metadata registration span separate services; an interrupted upload can leave a private unreferenced object. A leased outbox provides at-least-once transport and the room deduplicates cards by audit ID. [Current status](docs/STATUS_REPORT.md) · [Test record](docs/TESTING.md) · [Nexconn details](docs/NEXCONN.md)
+Two independent QA accounts exchanged private, community and issue-room messages and recovered history after reload. An independent reviewer approved a real issue created from a message after the database denied resolver self-approval. ProofGuard returned an advisory assessment. See the [judge evidence](docs/JUDGING_MATRIX.md) for test boundaries. Group typing and online presence are omitted. File upload and metadata registration span separate services; an interrupted upload can leave a private unreferenced object. A leased outbox provides at-least-once transport and the room deduplicates cards by audit ID. [Current status](docs/STATUS_REPORT.md) · [Test record](docs/TESTING.md) · [Nexconn details](docs/NEXCONN.md)
 
 ## Project guides
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security and access model](docs/SECURITY.md)
 - [Two-user demo script](docs/DEMO_SCRIPT.md)
-- [Submission checklist](docs/SUBMISSION.md)
+- [Submission checklist](docs/SUBMISSION_CHECKLIST.md)
