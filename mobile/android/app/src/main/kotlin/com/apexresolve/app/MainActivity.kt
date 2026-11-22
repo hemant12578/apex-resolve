@@ -29,6 +29,10 @@ class MainActivity : FlutterActivity() {
             val arguments = call.arguments as? Map<*, *> ?: emptyMap<String, String>()
             val cookieManager = CookieManager.getInstance()
             val cookies = cookieManager.getCookie(origin)
+            if (call.method != "login" && cookies.isNullOrBlank()) {
+                result.error("SIGN_IN", "Sign in to your workspace.", null)
+                return@setMethodCallHandler
+            }
             Thread {
                 try {
                     val connection = URL(origin + path).openConnection() as HttpsURLConnection
@@ -42,11 +46,15 @@ class MainActivity : FlutterActivity() {
                         connection.setRequestProperty("Content-Type", "application/json")
                         if (cookies != null) connection.setRequestProperty("Cookie", cookies)
                         if (connection.doOutput) connection.outputStream.use { it.write(JSONObject(arguments).toString().toByteArray(Charsets.UTF_8)) }
-                        if (connection.responseCode == 401) {
+                        val status = connection.responseCode
+                        if (status == 401) {
                             runOnUiThread { result.error("SIGN_IN", "Sign in to your workspace.", null) }
                             return@Thread
                         }
-                        if (connection.responseCode !in 200..299) throw IllegalStateException()
+                        if (status !in 200..299) {
+                            runOnUiThread { result.error("HTTP", "Workspace returned HTTP $status.", null) }
+                            return@Thread
+                        }
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
                         val updates = connection.headerFields.entries
                             .filter { it.key.equals("set-cookie", ignoreCase = true) }.flatMap { it.value }
@@ -63,7 +71,8 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     } finally { connection.disconnect() }
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    android.util.Log.w("ApexSession", "Workspace request failed: ${error.javaClass.simpleName}")
                     runOnUiThread { result.error("UNAVAILABLE", "Unable to open this session. Check your connection and sign in again.", null) }
                 }
             }.start()
