@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test("landing preview switches from conversation to evidence and verification", async ({page})=>{
-  await page.goto("/");
+  await page.goto("/landing");
   await expect(page.getByRole("heading",{level:1})).toContainText(/verified/i);
   const options=page.locator("#communication");
   await expect(options.getByRole("link",{name:/Private messages/})).toHaveAttribute("href","/communication?tab=chats");
@@ -14,7 +14,7 @@ test("landing preview switches from conversation to evidence and verification", 
 });
 test("the mobile landing and account forms fit the viewport",async({page})=>{
   await page.setViewportSize({width:375,height:812});
-  await page.goto("/");
+  await page.goto("/landing");
   await expect(page.getByRole("link",{name:"Create an account"})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.getByRole("link",{name:"Create an account"}).click();
@@ -26,7 +26,7 @@ test("the mobile landing and account forms fit the viewport",async({page})=>{
   await expect(page.getByRole("button",{name:"Send reset link"})).toBeVisible();
 });
 test("public requests cannot open protected pages or obtain a chat token",async({page,request,baseURL})=>{
-  for (const path of ["/dashboard","/knowledge","/settings"]) {
+  for (const path of ["/","/dashboard","/knowledge","/settings"]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/login(?:\?|$)/);
   }

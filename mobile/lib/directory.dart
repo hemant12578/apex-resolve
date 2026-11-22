@@ -1,6 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+
+import 'data.dart';
+import 'ui.dart';
 
 class Directory extends StatefulWidget {
   const Directory({
@@ -17,9 +19,17 @@ class Directory extends StatefulWidget {
 }
 
 class _DirectoryState extends State<Directory> {
-  List<dynamic> items = [];
-  String error = '', query = '';
-  bool loading = true, auth = false;
+  final search = TextEditingController();
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  List<ApexEntry> items = [];
+  String error = '', query = '', filter = 'All';
+  bool loading = true, auth = false, opening = false;
+
   @override
   void initState() {
     super.initState();
@@ -33,28 +43,56 @@ class _DirectoryState extends State<Directory> {
       auth = false;
     });
     try {
-      final raw = await const MethodChannel(
-        'apex/session',
-      ).invokeMethod<String>('directory', {'section': widget.section});
-      final result = jsonDecode(raw!) as Map;
-      if (mounted) setState(() => items = result['items'] as List);
+      final list =
+          widget.section == 'chats'
+              ? (await Future.wait([
+                loadDirectory('chats'),
+                loadDirectory('groups'),
+              ])).expand((entries) => entries).toList()
+              : await loadDirectory(widget.section);
+      if (mounted) setState(() => items = list);
     } on PlatformException catch (e) {
       if (mounted) {
         setState(() {
           auth = e.code == 'SIGN_IN';
           error =
               auth
-                  ? 'Sign in to see your ${widget.title.toLowerCase()}.'
-                  : 'Could not load your workspace.';
-          items = [];
+                  ? 'Sign in to load ${widget.title.toLowerCase()}.'
+                  : 'Could not load ${widget.title.toLowerCase()}.';
         });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => error = 'Could not load ${widget.title.toLowerCase()}.');
       }
     } finally {
       if (mounted) setState(() => loading = false);
     }
   }
 
-  bool opening = false;
+  List<ApexEntry> get visible {
+    final q = query.trim().toLowerCase();
+    return items.where((entry) {
+      if (q.isNotEmpty &&
+          !('${entry.title} ${entry.detail}'.toLowerCase().contains(q))) {
+        return false;
+      }
+      if (filter == 'People') return entry.isChat;
+      if (filter == 'Groups') return entry.isGroup;
+      if (filter == 'Needs review') return entry.needsReview;
+      if (filter == 'Open') return entry.isOpen;
+      if (filter == 'Working') return entry.status == ApexStatus.inProgress;
+      return true;
+    }).toList();
+  }
+
+  List<String> get filters =>
+      widget.section == 'issues'
+          ? const ['All', 'Open', 'Working', 'Needs review']
+          : widget.section == 'chats'
+          ? const ['All', 'People', 'Groups']
+          : const ['All'];
+
   Future<void> open(String path, {String? threadTitle}) async {
     if (opening) return;
     setState(() => opening = true);
@@ -68,19 +106,20 @@ class _DirectoryState extends State<Directory> {
 
   @override
   Widget build(BuildContext context) {
-    final matches =
-        items
-            .where(
-              (e) => e['title'].toString().toLowerCase().contains(
-                query.toLowerCase(),
-              ),
-            )
-            .toList();
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final matches = visible;
     final action = switch (widget.section) {
       'chats' => 'Find people',
       'groups' => 'Create community',
       'issues' => 'Create issue',
       _ => 'Search all solutions',
+    };
+    final actionIcon = switch (widget.section) {
+      'chats' => Icons.person_search_outlined,
+      'groups' => Icons.group_add_outlined,
+      'issues' => Icons.add_rounded,
+      _ => Icons.search_rounded,
     };
     final path = switch (widget.section) {
       'chats' => '/communication?tab=people',
@@ -89,89 +128,211 @@ class _DirectoryState extends State<Directory> {
       _ => '/knowledge',
     };
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: loading ? null : load,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            if (loading || opening) const LinearProgressIndicator(),
-            if (error.isNotEmpty)
+      body: ApexBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
               Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Row(
                   children: [
-                    Text(error),
-                    FilledButton(
-                      onPressed:
-                          () => open(auth ? '/login' : widget.workspacePath),
-                      child: Text(auth ? 'Sign in' : 'Open workspace'),
+                    IconButton(
+                      tooltip: 'Back',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontSize: 20,
+                            ),
+                          ),
+                          Text(
+                            '${items.length} ${items.length == 1 ? 'entry' : 'entries'}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      onPressed: loading ? null : load,
+                      icon: const Icon(Icons.refresh_rounded),
                     ),
                   ],
                 ),
-              )
-            else ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: TextField(
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search),
-                    hintText: 'Search ${widget.title.toLowerCase()}',
-                    border: const OutlineInputBorder(),
-                  ),
-                  onChanged: (text) => setState(() => query = text),
-                ),
               ),
+              if (loading || opening)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 18),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
               Expanded(
-                child: RefreshIndicator(
-                  onRefresh: load,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      if (!loading && matches.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            query.isEmpty ? 'Nothing here yet.' : 'No matches.',
-                          ),
-                        ),
-                      for (final item in matches)
-                        ListTile(
-                          title: Text(item['title'] as String),
-                          subtitle: Text(
-                            item['detail']?.toString() ?? '',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap:
-                              () => open(
-                                item['path'] as String,
-                                threadTitle: item['title'] as String,
+                child:
+                    error.isNotEmpty
+                        ? ApexEmpty(
+                          icon:
+                              auth
+                                  ? Icons.lock_outline_rounded
+                                  : Icons.cloud_off_outlined,
+                          title: auth ? 'Sign in required' : 'Unavailable',
+                          body: error,
+                          action: auth ? 'Sign in' : 'Try again',
+                          onAction: () => auth ? open('/login') : load(),
+                        )
+                        : RefreshIndicator(
+                          onRefresh: load,
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.fromLTRB(18, 12, 18, 110),
+                            children: [
+                              TextField(
+                                controller: search,
+                                onChanged:
+                                    (text) => setState(() => query = text),
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'Search ${widget.title.toLowerCase()}',
+                                  prefixIcon: const Icon(
+                                    Icons.search_rounded,
+                                    size: 20,
+                                  ),
+                                  isDense: true,
+                                ),
                               ),
+                              if (filters.length > 1) ...[
+                                const SizedBox(height: 10),
+                                SizedBox(
+                                  height: 34,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: filters.length,
+                                    separatorBuilder:
+                                        (_, _) => const SizedBox(width: 7),
+                                    itemBuilder: (context, index) {
+                                      final option = filters[index];
+                                      final active = option == filter;
+                                      return GestureDetector(
+                                        onTap:
+                                            () =>
+                                                setState(() => filter = option),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(
+                                            milliseconds: 150,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 13,
+                                          ),
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color:
+                                                active
+                                                    ? theme.colorScheme.primary
+                                                        .withValues(alpha: .16)
+                                                    : theme
+                                                        .colorScheme
+                                                        .surfaceContainerHighest,
+                                            borderRadius: BorderRadius.circular(
+                                              20,
+                                            ),
+                                            border: Border.all(
+                                              color:
+                                                  active
+                                                      ? theme
+                                                          .colorScheme
+                                                          .primary
+                                                          .withValues(
+                                                            alpha: .55,
+                                                          )
+                                                      : theme
+                                                          .colorScheme
+                                                          .outline,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            option,
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight:
+                                                  active
+                                                      ? FontWeight.w800
+                                                      : FontWeight.w600,
+                                              color:
+                                                  active
+                                                      ? theme
+                                                          .colorScheme
+                                                          .primary
+                                                      : muted,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 14),
+                              if (!loading && matches.isEmpty)
+                                ApexEmpty(
+                                  icon:
+                                      query.isEmpty && filter == 'All'
+                                          ? Icons.inbox_outlined
+                                          : Icons.search_off_rounded,
+                                  title:
+                                      query.isEmpty && filter == 'All'
+                                          ? 'Nothing here yet'
+                                          : 'No matches',
+                                  body:
+                                      query.isEmpty && filter == 'All'
+                                          ? 'New ${widget.title.toLowerCase()} will appear here.'
+                                          : 'Try a different name or clear the filters.',
+                                  action:
+                                      query.isEmpty && filter == 'All'
+                                          ? action
+                                          : 'Clear filters',
+                                  onAction:
+                                      () =>
+                                          query.isEmpty && filter == 'All'
+                                              ? open(path)
+                                              : setState(() {
+                                                search.clear();
+                                                query = '';
+                                                filter = 'All';
+                                              }),
+                                )
+                              else
+                                for (final entry in matches)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: ApexEntryTile(
+                                      entry: entry,
+                                      onTap:
+                                          () => open(
+                                            entry.path,
+                                            threadTitle: entry.title,
+                                          ),
+                                    ),
+                                  ),
+                            ],
+                          ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: FilledButton.icon(
-                  onPressed: () => open(path),
-                  icon: const Icon(Icons.arrow_forward),
-                  label: Text(action),
-                ),
               ),
             ],
-          ],
+          ),
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => open(path),
+        icon: Icon(actionIcon, size: 19),
+        label: Text(action),
       ),
     );
   }

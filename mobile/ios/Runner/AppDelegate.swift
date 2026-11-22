@@ -27,6 +27,17 @@ import WebKit
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if call.method == "logout" {
+      let store = WKWebsiteDataStore.default().httpCookieStore
+      store.getAllCookies { cookies in
+        let group = DispatchGroup()
+        for cookie in cookies where cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == self.origin.host {
+          group.enter(); store.delete(cookie) { group.leave() }
+        }
+        group.notify(queue: .main) { result(true) }
+      }
+      return
+    }
     let args = call.arguments as? [String: Any] ?? [:]
     let path: String
     switch call.method {

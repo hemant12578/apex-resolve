@@ -2,7 +2,8 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Message } from '@nexconn/chat';
-import { CheckCheck, MessageCircle, Send, Search, X } from 'lucide-react';
+import { CheckCheck, MessageCircle, Send, Search, X, Smile, Paperclip, Zap, ArrowUpRight } from 'lucide-react';
+import Link from 'next/link';
 import { z } from 'zod';
 import ChatBubble from './ChatBubble';
 import MessageIssue from './MessageIssue';
@@ -15,6 +16,13 @@ const workflowSchema=z.object({eventId:z.uuid(),action:z.string().max(100),detai
 const dayFormat=new Intl.DateTimeFormat(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
 type Entry={mine?:boolean;source?:Message;quote?:string;id:string; sender:string; text:string; time:number; detail?:string; event:boolean};
 type RoomControls={send:(text:string,parent?:Message)=>Promise<void>; older:()=>Promise<void>};
+const emojis=['👍','✅','🙏','🔥','🎉','👀','🚀','⚠️','🔍','🧪','📎','💬'];
+const quickReplies=[
+  {label:'On it',text:'On it — I’ll take a look now.'},
+  {label:'Investigating',text:'Investigating now. I’ll share what I find.'},
+  {label:'Retest ready',text:'Retest is ready for verification.'},
+  {label:'Fixed',text:'Fixed and verified on staging.'}
+];
 let initialized=false;
 // Serialize connect/disconnect for the SDK singleton across rapid route changes.
 let lifecycle=Promise.resolve();
@@ -35,6 +43,7 @@ function ChatConnection({issueId,retry,workspace,destinations,sourcePath,direct,
   const [search,setSearch]=useState('');
   const [reply,setReply]=useState<Entry|null>(null);
   const [draft,setDraft]=useState(''),[busy,setBusy]=useState(false),[loadingHistory,setLoadingHistory]=useState(false);
+  const [emojiOpen,setEmojiOpen]=useState(false),[quickOpen,setQuickOpen]=useState(false),[attachOpen,setAttachOpen]=useState(false);
   const [receipts,setReceipts]=useState<Record<string,number>>({});
   const [failedSend,setFailedSend]=useState(false);
   const followedHash=useRef('');
@@ -160,12 +169,12 @@ function ChatConnection({issueId,retry,workspace,destinations,sourcePath,direct,
   },[issueId,direct,community,memberNames]);
   const term=search.trim().toLocaleLowerCase();
   const visible=term?messages.filter(message=>message.text.toLocaleLowerCase().includes(term)):messages;
-  return <section aria-label="Room conversation"  className="panel room-chat">
-    <div className="chat-heading"><h2 className={direct||community?"chat-kind":"room-title"}><MessageCircle size={20}/> {community?'Group chat':direct?'Private chat':'Conversation'}</h2><button type="button" className="chat-search-toggle" aria-expanded={searchOpen} onClick={()=>{setSearchOpen(!searchOpen);setSearch('')}} aria-label="Search messages" title="Search messages"><Search size={18}/></button><small className="chat-connection" data-connected={status==='Connected'} role="status">{status}</small></div>
+  return <section aria-label="Room conversation" className="panel room-chat wa-chat">
+    <div className="chat-heading wa-chat-heading"><h2 className={direct||community?"chat-kind":"room-title"}><MessageCircle size={18}/> {community?'Group chat':direct?'Private chat':'Conversation'}</h2><span className="wa-chat-heading-spacer"/><button type="button" className="chat-search-toggle" aria-expanded={searchOpen} onClick={()=>{setSearchOpen(!searchOpen);setSearch('')}} aria-label="Search messages" title="Search messages"><Search size={18}/></button><small className="chat-connection" data-connected={status==='Connected'} role="status">{status}</small></div>
     {error && <div role="alert" className="chat-alert">{error} <button type="button" onClick={retry}>Reconnect</button></div>}
     {searchOpen&&<div className="history-tools"><input type="search" aria-label="Search loaded messages" placeholder="Search loaded messages…" value={search} onChange={event=>setSearch(event.target.value)}/>{term&&<small role="status">{visible.length} matches</small>}</div>}
-    <div ref={list} className="chat-history" role="log" aria-live="polite" onScroll={e=>{const box=e.currentTarget;sticky.current=box.scrollHeight-box.scrollTop-box.clientHeight<64;}}>
-      {more && <button disabled={loadingHistory} type="button" onClick={async()=>{sticky.current=false;
+    <div ref={list} className="chat-history wa-chat-history" role="log" aria-live="polite" onScroll={e=>{const box=e.currentTarget;sticky.current=box.scrollHeight-box.scrollTop-box.clientHeight<64;}}>
+      {more && <button className="wa-earlier" disabled={loadingHistory} type="button" onClick={async()=>{sticky.current=false;
         const first=list.current?.querySelector('article[id]');
         if(first)historyAnchor.current={id:first.id,top:first.getBoundingClientRect().top};
         setLoadingHistory(true);try{await controls.current?.older();}catch{historyAnchor.current=null;setError('Earlier messages could not load.');}finally{setLoadingHistory(false);}}}>Earlier messages</button>}
@@ -180,19 +189,23 @@ function ChatConnection({issueId,retry,workspace,destinations,sourcePath,direct,
             time={time} text={m.text} quote={m.quote} event={m.event} detail={m.detail}
             onReply={m.source&&!busy?()=>{setReply(m);composer.current?.focus()}:undefined}>
             {(workspace||Boolean(destinations?.length))&&!m.event&&<MessageIssue sourcePath={sourcePath} destinations={destinations} workspace={workspace} issue={issueId} message={m.id} text={m.text}/>}
-            {receipts[m.id]>0&&<small><CheckCheck size={13}/> Read by {receipts[m.id]}</small>}
+            {receipts[m.id]>0&&<small className="wa-receipt"><CheckCheck size={13}/> Read by {receipts[m.id]}</small>}
           </ChatBubble></Fragment>;
       })}
     </div>
-    {reply&&<aside className="reply-preview" aria-live="polite"><strong>Replying to {reply.sender}</strong><p>{reply.text.slice(0,180)}</p><button type="button" disabled={busy} onClick={()=>setReply(null)} aria-label="Cancel reply"><X size={16}/></button></aside>}
-    <form className="chat-compose" onSubmit={async e=>{e.preventDefault();const text=draft.trim();if(!text || busy || status!=='Connected' || !controls.current)return;setError('');setFailedSend(false);setBusy(true);try{await controls.current.send(text,reply?.source);setReply(null);setDraft('');}catch{setFailedSend(true);}finally{setBusy(false);}}}>
+    {reply&&<aside className="reply-preview wa-reply" aria-live="polite"><strong>Replying to {reply.sender}</strong><p>{reply.text.slice(0,180)}</p><button type="button" disabled={busy} onClick={()=>setReply(null)} aria-label="Cancel reply"><X size={16}/></button></aside>}
+    <form className="chat-compose wa-composer" onSubmit={async e=>{e.preventDefault();const text=draft.trim();if(!text || busy || status!=='Connected' || !controls.current)return;setError('');setFailedSend(false);setBusy(true);try{await controls.current.send(text,reply?.source);setReply(null);setDraft('');setEmojiOpen(false);setQuickOpen(false);setAttachOpen(false);}catch{setFailedSend(true);}finally{setBusy(false);}}}>
+      {emojiOpen&&<div className="wa-emoji-pop" role="group" aria-label="Emoji picker">{emojis.map(emoji=><button key={emoji} type="button" onClick={()=>{setDraft(value=>value+emoji);composer.current?.focus();}} aria-label={'Insert '+emoji}>{emoji}</button>)}</div>}
+      {quickOpen&&<div className="wa-quick-pop" role="group" aria-label="Quick replies"><strong>Quick replies</strong>{quickReplies.map(replyText=><button key={replyText.label} type="button" onClick={()=>{setDraft(replyText.text);setQuickOpen(false);composer.current?.focus();}}><Zap size={13}/> {replyText.label}</button>)}</div>}
+      {attachOpen&&<div className="wa-attach-pop" role="group" aria-label="Chat actions">{direct||community?<><Link href="/dashboard?view=resolution&create=issue"><ArrowUpRight size={15}/> Create an issue</Link><Link href="/communication?tab=people#directory-search"><ArrowUpRight size={15}/> Start a new chat</Link></>:<><Link href={'/issues/'+issueId}><ArrowUpRight size={15}/> Open resolution room</Link><Link href={'/issues/'+issueId+'#evidence'}><ArrowUpRight size={15}/> Add evidence</Link></>}</div>}
+      <div className="wa-compose-tools"><button type="button" onClick={()=>{setEmojiOpen(!emojiOpen);setQuickOpen(false);setAttachOpen(false)}} aria-label="Add emoji" aria-expanded={emojiOpen}><Smile size={20}/></button><button type="button" onClick={()=>{setQuickOpen(!quickOpen);setEmojiOpen(false);setAttachOpen(false)}} aria-label="Quick replies" aria-expanded={quickOpen}><Zap size={19}/></button><button type="button" onClick={()=>{setAttachOpen(!attachOpen);setEmojiOpen(false);setQuickOpen(false)}} aria-label="Chat actions" aria-expanded={attachOpen}><Paperclip size={19}/></button></div>
       <textarea ref={composer} rows={1} onKeyDown={e=>{
         if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){
           e.preventDefault();e.currentTarget.form?.requestSubmit();
         }
       }} aria-label="Message" maxLength={2000} value={draft} onChange={e=>{setDraft(e.target.value);setFailedSend(false);}} placeholder={direct?"Write a private message…" :community?"Message the community…":"Message the room…"} disabled={status!=='Connected'||busy}/>
+      <button className="wa-send" type="submit" disabled={busy || !draft.trim() || status!=='Connected'} aria-label="Send message"><Send size={19}/> <span>{failedSend?'Retry':'Send'}</span></button>
       <span className="compose-hint" role="status">{busy?'Sending…':failedSend?'Send unconfirmed. Check the timeline before retrying.':'Enter to send · Shift+Enter for a new line'}</span>
-      <button type="submit" disabled={busy || !draft.trim() || status!=='Connected'} aria-label="Send message"><Send size={18}/> <span>{failedSend?'Retry':'Send'}</span></button>
     </form>
   </section>;
 }

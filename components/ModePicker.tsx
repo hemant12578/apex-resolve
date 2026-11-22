@@ -15,7 +15,7 @@ async function chooseMode(form: FormData) {
 }
 
 export default function ModePicker({current,descriptions=false,settings=false}:{current:unknown;descriptions?:boolean;settings?:boolean}) {
-  return <form action={chooseMode} aria-label="Home view" className="mode-picker">
+  return <form action={chooseMode} aria-label="Home view" className={'mode-picker '+(settings?'mode-picker-cards':'mode-picker-seg')}>
     {settings&&<input type="hidden" name="stay" value="settings"/>}
     {Object.entries(modes).map(([value,label])=><ModeButton key={value} value={value} selected={homeMode(current)===value}><strong>{label}</strong>{descriptions&&<span>{{explore:'See your rooms, tasks, and recent activity.',communication:'Find a conversation and message your team.',resolution:'Track issues, review evidence, and verify fixes.'}[value]}</span>}</ModeButton>)}
   </form>;

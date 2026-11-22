@@ -1,5 +1,4 @@
 import {cookies} from "next/headers";
-import ThemeSwitch from "@/components/ThemeSwitch";
 import type { Metadata } from "next";
 import "./globals.css";
 import FirebaseAnalytics from "@/components/FirebaseAnalytics";
@@ -11,5 +10,5 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: Readonly<{children: React.ReactNode}>) {
   const theme=(await cookies()).get("apex_theme")?.value==="white"?"white":"black";
-  return <html lang="en" data-theme={theme}><body><ThemeSwitch initial={theme}/>{children}<FirebaseAnalytics/></body></html>;
+  return <html lang="en" data-theme={theme}><body>{children}<FirebaseAnalytics/></body></html>;
 }

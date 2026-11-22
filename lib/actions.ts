@@ -5,6 +5,7 @@ import {headers} from 'next/headers';
 import {revalidatePath} from 'next/cache';
 import {z} from 'zod';
 import {db,session,storageAdmin} from './db';
+import {homeMode} from './modes';
 import {validateEvidence} from './file-validation.mjs';
 
 function field(f:FormData,key:string){return String(f.get(key)??'').trim()}
@@ -44,6 +45,18 @@ export async function googleSignIn(){
   redirect(data.url);
 }
 export async function logout(){const {client}=await session();const {error}=await client.auth.signOut({scope:'local'});if(error)message('/settings','Sign-out failed. Please retry.');redirect('/login')}
+export async function onboard(f:FormData){
+  const {client}=await session();
+  const name=field(f,'display_name').replace(/\s+/g,' ').slice(0,100);
+  const mode=homeMode(field(f,'mode'));
+  if(name.length<2)message('/welcome','Choose a username with at least two characters.');
+  const {error}=await client.rpc('update_profile',{p_display_name:name});
+  if(error)message('/welcome','Could not save your username. Try again.');
+  const saved=await client.auth.updateUser({data:{home_mode:mode}});
+  if(saved.error)message('/welcome','Could not save your starting view. Try again.');
+  revalidatePath('/','layout');
+  redirect(mode==='communication'?'/communication':mode==='resolution'?'/dashboard?view=resolution':'/dashboard');
+}
 export async function resetPassword(f:FormData){
   const client=await db().catch(()=>message('/reset','Configure Supabase first.'));
   if(field(f,'mode')==='change'){
