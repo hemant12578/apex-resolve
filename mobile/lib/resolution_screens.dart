@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
+import 'local_storage.dart';
 import 'native_chat.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -54,26 +55,36 @@ class _ResolutionDetailScreenState extends State<ResolutionDetailScreen> {
   }
 
   Future<void> openChat() async {
+    Map<String, dynamic>? session;
+    final cacheKey = 'chat_session_issue_${widget.issueId}';
     try {
-      final session = await ApexApiClient.chatSession(issueId: widget.issueId);
-      if (!mounted) return;
+      session = await ApexApiClient.chatSession(issueId: widget.issueId);
+      await LocalVault.save(cacheKey, session);
+    } catch (_) {
+      final cached = await LocalVault.read(cacheKey);
+      if (cached is Map) {
+        session = Map<String, dynamic>.from(cached);
+      }
+    }
+    if (!mounted) return;
+    if (session != null) {
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => NativeChat(
-            session: session,
+            session: session!,
             title: data?['issue']?['title'] ?? widget.initialTitle ?? 'Resolution Room',
             showWorkspace: false,
           ),
         ),
       );
       load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open chat: $e')),
-        );
-      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Chat room not yet cached. Connect to internet once to sync.'),
+        ),
+      );
     }
   }
 

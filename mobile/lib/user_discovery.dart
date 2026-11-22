@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import 'api_client.dart';
+import 'local_storage.dart';
 import 'native_chat.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -82,23 +83,34 @@ class _UserDiscoveryScreenState extends State<UserDiscoveryScreen> {
   }
 
   Future<void> openChat(String peerId, String peerName) async {
+    Map<String, dynamic>? session;
+    final cacheKey = 'chat_session_peer_$peerId';
     try {
-      final session = await ApexApiClient.chatSession(peerId: peerId);
-      if (!mounted) return;
+      session = await ApexApiClient.chatSession(peerId: peerId);
+      await LocalVault.save(cacheKey, session);
+    } catch (_) {
+      final cached = await LocalVault.read(cacheKey);
+      if (cached is Map) {
+        session = Map<String, dynamic>.from(cached);
+      }
+    }
+    if (!mounted) return;
+    if (session != null) {
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => NativeChat(
-            session: session,
+            session: session!,
             title: peerName,
             showWorkspace: false,
           ),
         ),
       );
-    } catch (e) {
-      if (!mounted) return;
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open conversation: ${e.toString()}')),
+        const SnackBar(
+          content: Text('Conversation not yet cached. Connect to internet once to sync.'),
+        ),
       );
     }
   }

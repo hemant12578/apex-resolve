@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'local_storage.dart';
 import 'theme.dart';
 
 enum ApexStatus { open, inProgress, review, verified, todo, done, unknown }
@@ -162,15 +163,43 @@ class ApexWorkspace {
 }
 
 Future<List<ApexEntry>> loadDirectory(String section) async {
-  final raw = await const MethodChannel(
-    'apex/session',
-  ).invokeMethod<String>('directory', {'section': section});
-  final result = jsonDecode(raw ?? '{}') as Map<String, dynamic>;
-  final items = result['items'] as List? ?? const [];
-  return items
-      .whereType<Map>()
-      .map((e) => ApexEntry.fromJson(Map<String, dynamic>.from(e), section))
-      .toList();
+  List? cachedItems;
+  try {
+    final cached = await LocalVault.read('directory_$section');
+    if (cached is List) cachedItems = cached;
+  } catch (_) {}
+
+  try {
+    final raw = await const MethodChannel(
+      'apex/session',
+    ).invokeMethod<String>('directory', {'section': section});
+    final result = jsonDecode(raw ?? '{}') as Map<String, dynamic>;
+    final items = result['items'] as List? ?? const [];
+    // Save to permanent local disk for offline opening
+    await LocalVault.save('directory_$section', items);
+    return items
+        .whereType<Map>()
+        .map((e) => ApexEntry.fromJson(Map<String, dynamic>.from(e), section))
+        .toList();
+  } on PlatformException catch (e) {
+    if (e.code == 'SIGN_IN') rethrow;
+    if (cachedItems != null && cachedItems.isNotEmpty) {
+      return cachedItems
+          .whereType<Map>()
+          .map((e) => ApexEntry.fromJson(Map<String, dynamic>.from(e), section))
+          .toList();
+    }
+    rethrow;
+  } catch (_) {
+    // Return cached items if available offline
+    if (cachedItems != null && cachedItems.isNotEmpty) {
+      return cachedItems
+          .whereType<Map>()
+          .map((e) => ApexEntry.fromJson(Map<String, dynamic>.from(e), section))
+          .toList();
+    }
+    return <ApexEntry>[];
+  }
 }
 
 Future<ApexWorkspace> loadWorkspace() async {

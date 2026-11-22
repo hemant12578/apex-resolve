@@ -13,6 +13,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         MethodChannel(engine.dartExecutor.binaryMessenger, "apex/session").setMethodCallHandler { call, result ->
+            if (call.method == "getStorageDir") {
+                result.success(applicationContext.filesDir.absolutePath)
+                return@setMethodCallHandler
+            }
             if (call.method == "logout") {
                 val cookieManager = CookieManager.getInstance()
                 cookieManager.removeAllCookies {

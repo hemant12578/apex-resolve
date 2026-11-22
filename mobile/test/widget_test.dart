@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:app/apex_ai_screen.dart';
 import 'package:app/home.dart';
+import 'package:app/local_storage.dart';
 import 'package:app/main.dart';
 import 'package:app/native_chat.dart';
 import 'package:app/profile_screen.dart';
 import 'package:app/resolution_screens.dart';
+import 'package:app/session.dart';
 import 'package:app/theme.dart';
 import 'package:app/user_discovery.dart';
 import 'package:app/workspace_management.dart';
@@ -13,6 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  setUp(() => ApexSession.clear());
+
   testWidgets('home exposes conversations and resolution workflows', (
     tester,
   ) async {
@@ -23,7 +29,10 @@ void main() {
     const channel = MethodChannel('apex/session');
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(channel, (_) async => '{"items":[]}');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getStorageDir') return Directory.systemTemp.path;
+      return '{"items":[]}';
+    });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     await tester.pumpWidget(const ApexApp(firebase: true));
     await tester.pumpAndSettle();
@@ -43,7 +52,10 @@ void main() {
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(
         channel,
-        (_) async => throw PlatformException(code: 'SIGN_IN'),
+        (call) async {
+          if (call.method == 'getStorageDir') return Directory.systemTemp.path;
+          throw PlatformException(code: 'SIGN_IN');
+        },
       );
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       await tester.pumpWidget(const ApexApp(firebase: true));
@@ -69,7 +81,10 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(
       channel,
-      (_) async => throw PlatformException(code: 'SIGN_IN'),
+      (call) async {
+        if (call.method == 'getStorageDir') return Directory.systemTemp.path;
+        throw PlatformException(code: 'SIGN_IN');
+      },
     );
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     await tester.pumpWidget(const ApexApp(firebase: true));
@@ -340,5 +355,75 @@ void main() {
     expect(status, isNotEmpty);
     expect(starterStickers.any((s) => s.emoji == '🚀' && s.title == 'Ship It!'), isTrue);
     expect(starterStickers.any((s) => s.emoji == '🛡️' && s.title == 'Verified'), isTrue);
+  });
+
+  test('ChatMessageItem serialization and deserialization preserves all message fields', () {
+    const original = ChatMessageItem(
+      messageId: 'msg-offline-101',
+      senderUserId: 'user-42',
+      senderName: 'Hemant Prakash',
+      text: 'Verified native Flutter chat with local storage!',
+      sentTime: 1732300000000,
+    );
+
+    final json = original.toJson();
+    expect(json['messageId'], 'msg-offline-101');
+    expect(json['senderUserId'], 'user-42');
+    expect(json['senderName'], 'Hemant Prakash');
+    expect(json['text'], 'Verified native Flutter chat with local storage!');
+    expect(json['sentTime'], 1732300000000);
+
+    final restored = ChatMessageItem.fromJson(json);
+    expect(restored.messageId, original.messageId);
+    expect(restored.senderUserId, original.senderUserId);
+    expect(restored.senderName, original.senderName);
+    expect(restored.text, original.text);
+    expect(restored.sentTime, original.sentTime);
+  });
+
+  test('LocalVault offline message persistence saves and retrieves messages like WhatsApp', () async {
+    const channelId = 'channel_unit_test_99';
+    final messages = [
+      {
+        'messageId': 'm-1',
+        'senderUserId': 'user-1',
+        'senderName': 'Alice',
+        'text': 'Hello from earlier session!',
+        'sentTime': 1732299000000,
+      },
+      {
+        'messageId': 'm-2',
+        'senderUserId': 'user-2',
+        'senderName': 'Bob',
+        'text': 'Everything saved on phone disk offline.',
+        'sentTime': 1732299100000,
+      },
+    ];
+
+    // Save to local device vault
+    await LocalVault.save('chat_messages_$channelId', messages);
+
+    // Retrieve offline
+    final retrieved = await LocalVault.read('chat_messages_$channelId');
+    expect(retrieved, isNotNull);
+    expect(retrieved, isList);
+    final list = retrieved as List;
+    expect(list.length, 2);
+
+    final msg1 = ChatMessageItem.fromJson(Map<String, dynamic>.from(list[0] as Map));
+    final msg2 = ChatMessageItem.fromJson(Map<String, dynamic>.from(list[1] as Map));
+
+    expect(msg1.messageId, 'm-1');
+    expect(msg1.senderName, 'Alice');
+    expect(msg1.text, 'Hello from earlier session!');
+
+    expect(msg2.messageId, 'm-2');
+    expect(msg2.senderName, 'Bob');
+    expect(msg2.text, 'Everything saved on phone disk offline.');
+
+    // Cleanup
+    await LocalVault.remove('chat_messages_$channelId');
+    final afterRemove = await LocalVault.read('chat_messages_$channelId');
+    expect(afterRemove, isNull);
   });
 }

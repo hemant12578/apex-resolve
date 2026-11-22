@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import 'apex_ai_screen.dart';
 import 'data.dart';
 import 'directory.dart';
+import 'local_storage.dart';
 import 'native_chat.dart';
 import 'profile_screen.dart';
 import 'resolution_screens.dart';
@@ -163,17 +164,31 @@ class _HomeState extends State<Home> {
         return;
       }
 
+      Map<String, dynamic>? sessionData;
+      final sessionCacheKey =
+          'chat_session_${target['channelId'] ?? target['communityId'] ?? target['peerUserId'] ?? destination.replaceAll('/', '_')}';
       try {
         final value = await const MethodChannel(
           'apex/session',
         ).invokeMethod<String>('chat', target);
-        if (!mounted) return;
+        if (value != null && value.isNotEmpty) {
+          sessionData = jsonDecode(value) as Map<String, dynamic>;
+          await LocalVault.save(sessionCacheKey, sessionData);
+        }
+      } catch (_) {
+        final cached = await LocalVault.read(sessionCacheKey);
+        if (cached is Map) {
+          sessionData = Map<String, dynamic>.from(cached);
+        }
+      }
+
+      if (sessionData != null && mounted) {
         await Navigator.push<bool>(
           context,
           MaterialPageRoute(
             builder:
                 (_) => NativeChat(
-                  session: jsonDecode(value!) as Map<String, dynamic>,
+                  session: sessionData!,
                   title: title,
                   showWorkspace: false,
                 ),
@@ -182,8 +197,15 @@ class _HomeState extends State<Home> {
         if (nc.NCEngine.isInitialized) await nc.NCEngine.disconnect();
         if (mounted) await load();
         return;
-      } on PlatformException {
-        if (!mounted) return;
+      }
+      if (!mounted) return;
+      if (sessionData == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Chat room not yet cached. Connect to internet once to sync.'),
+          ),
+        );
+        return;
       }
     }
     if (!mounted) return;

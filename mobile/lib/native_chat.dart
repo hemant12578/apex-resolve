@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
+import 'local_storage.dart';
 import 'resolution_screens.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -49,6 +50,59 @@ const starterStickers = <ApexStickerItem>[
   ApexStickerItem(emoji: '📝', title: 'Documented', pack: 'Status'),
 ];
 
+/// Represents a chat message that can be loaded and persisted offline
+/// on the device disk, allowing users to view older messages without internet.
+class ChatMessageItem {
+  final String messageId;
+  final String senderUserId;
+  final String? senderName;
+  final String text;
+  final int sentTime;
+
+  const ChatMessageItem({
+    required this.messageId,
+    required this.senderUserId,
+    this.senderName,
+    required this.text,
+    required this.sentTime,
+  });
+
+  factory ChatMessageItem.fromNcMessage(nc.Message m, String currentUserId) {
+    final id = m.messageId ?? 'msg_${DateTime.now().microsecondsSinceEpoch}';
+    final senderId = m.senderUserId ?? currentUserId;
+    final name = m.userInfo?.name;
+    final text = m is nc.TextMessage ? (m.text ?? '') : '';
+    final time = m.sentTime ?? DateTime.now().millisecondsSinceEpoch;
+    return ChatMessageItem(
+      messageId: id,
+      senderUserId: senderId,
+      senderName: name,
+      text: text,
+      sentTime: time,
+    );
+  }
+
+  factory ChatMessageItem.fromJson(Map<String, dynamic> json) {
+    return ChatMessageItem(
+      messageId: json['messageId'] as String? ?? '',
+      senderUserId: json['senderUserId'] as String? ?? '',
+      senderName: json['senderName'] as String?,
+      text: json['text'] as String? ?? '',
+      sentTime: json['sentTime'] as int? ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'messageId': messageId,
+      'senderUserId': senderUserId,
+      'senderName': senderName,
+      'text': text,
+      'sentTime': sentTime,
+    };
+  }
+}
+
 class NativeChat extends StatefulWidget {
   const NativeChat({
     super.key,
@@ -68,7 +122,7 @@ class NativeChat extends StatefulWidget {
 class _NativeChatState extends State<NativeChat> {
   final draft = TextEditingController();
   final searchCtrl = TextEditingController();
-  final messages = <String, nc.Message>{};
+  final messages = <String, ChatMessageItem>{};
   final reactions = <String, Map<String, int>>{}; // messageId -> {emoji: count}
 
   late final channel = nc.GroupChannel(widget.session['channelId'] as String);
@@ -84,7 +138,7 @@ class _NativeChatState extends State<NativeChat> {
   bool searchOpen = false;
   String searchQuery = '';
   String status = 'Connecting…';
-  nc.Message? replyTarget;
+  ChatMessageItem? replyTarget;
 
   late final Future<void> startup;
 
@@ -100,7 +154,65 @@ class _NativeChatState extends State<NativeChat> {
   void initState() {
     super.initState();
     ThemeController.global.addListener(_onThemeChanged);
+    _loadCachedMessages();
     startup = connect();
+  }
+
+  void _parseReactions(String text, String messageId) {
+    if (text.startsWith('[React:')) {
+      final match = RegExp(r'^\[React:\s*([^\s]+)\s+to\s+([A-Za-z0-9_-]+)\]').firstMatch(text);
+      if (match != null) {
+        final emoji = match.group(1)!;
+        final targetId = match.group(2)!;
+        reactions.putIfAbsent(targetId, () => {});
+        reactions[targetId]![emoji] = (reactions[targetId]![emoji] ?? 0) + 1;
+      }
+    }
+  }
+
+  Future<void> _loadCachedMessages() async {
+    final channelId = channel.channelIdentifier.channelId;
+    try {
+      final cachedReactions = await LocalVault.read('chat_reactions_$channelId');
+      if (cachedReactions is Map && mounted) {
+        setState(() {
+          for (final entry in cachedReactions.entries) {
+            if (entry.value is Map) {
+              reactions[entry.key.toString()] = Map<String, int>.from(
+                (entry.value as Map).map((k, v) => MapEntry(k.toString(), (v as num).toInt())),
+              );
+            }
+          }
+        });
+      }
+
+      final cached = await LocalVault.read('chat_messages_$channelId');
+      if (cached is List && cached.isNotEmpty && mounted) {
+        setState(() {
+          for (final item in cached) {
+            if (item is Map) {
+              final msg = ChatMessageItem.fromJson(Map<String, dynamic>.from(item));
+              if (msg.messageId.isNotEmpty) {
+                messages[msg.messageId] = msg;
+                _parseReactions(msg.text, msg.messageId);
+              }
+            }
+          }
+          if (!connected) {
+            status = 'Offline — viewing saved messages';
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistMessages() async {
+    try {
+      final channelId = channel.channelIdentifier.channelId;
+      final list = messages.values.map((m) => m.toJson()).toList();
+      await LocalVault.save('chat_messages_$channelId', list);
+      await LocalVault.save('chat_reactions_$channelId', reactions);
+    } catch (_) {}
   }
 
   @override
@@ -203,25 +315,23 @@ class _NativeChatState extends State<NativeChat> {
       await loadHistory();
     } catch (_) {
       if (mounted) {
-        setState(() => status = 'Unable to connect. Tap retry to reconnect.');
+        setState(() {
+          connected = false;
+          status = messages.isNotEmpty
+              ? 'Offline — viewing saved messages'
+              : 'Offline — tap retry to reconnect';
+        });
       }
     }
   }
 
   void merge(nc.Message message) {
-    final key = message.messageId;
-    if (key != null) {
-      messages[key] = message;
-      // Parse reaction messages if any
-      if (message is nc.TextMessage && message.text != null && message.text!.startsWith('[React:')) {
-        final match = RegExp(r'^\[React:\s*([^\s]+)\s+to\s+([A-Za-z0-9_-]+)\]').firstMatch(message.text!);
-        if (match != null) {
-          final emoji = match.group(1)!;
-          final targetId = match.group(2)!;
-          reactions.putIfAbsent(targetId, () => {});
-          reactions[targetId]![emoji] = (reactions[targetId]![emoji] ?? 0) + 1;
-        }
-      }
+    final currentUserId = widget.session['userId']?.toString() ?? '';
+    final item = ChatMessageItem.fromNcMessage(message, currentUserId);
+    if (item.messageId.isNotEmpty) {
+      messages[item.messageId] = item;
+      _parseReactions(item.text, item.messageId);
+      _persistMessages();
     }
   }
 
@@ -238,9 +348,15 @@ class _NativeChatState extends State<NativeChat> {
         }
         if (mounted) {
           setState(() {
+            final currentUserId = widget.session['userId']?.toString() ?? '';
             for (final message in page?.data ?? <nc.Message>[]) {
-              merge(message);
+              final item = ChatMessageItem.fromNcMessage(message, currentUserId);
+              if (item.messageId.isNotEmpty) {
+                messages[item.messageId] = item;
+                _parseReactions(item.text, item.messageId);
+              }
             }
+            _persistMessages();
           });
         }
         done.complete();
@@ -248,7 +364,9 @@ class _NativeChatState extends State<NativeChat> {
       await done.future.timeout(const Duration(seconds: 15));
     } catch (_) {
       if (mounted) {
-        setState(() => status = 'History unavailable. Retry with Load earlier.');
+        setState(() => status = connected
+            ? 'History unavailable. Retry with Load earlier.'
+            : 'Offline — viewing saved messages');
       }
     } finally {
       if (mounted) setState(() => paging = false);
@@ -256,7 +374,17 @@ class _NativeChatState extends State<NativeChat> {
   }
 
   Future<void> sendRawText(String text) async {
-    if (text.isEmpty || sending || !connected) return;
+    if (text.isEmpty || sending) return;
+    if (!connected) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Offline mode: Connect to the internet to send live messages.'),
+          ),
+        );
+      }
+      return;
+    }
     setState(() => sending = true);
     try {
       final done = Completer<void>();
@@ -297,7 +425,7 @@ class _NativeChatState extends State<NativeChat> {
 
     String payload = text;
     if (replyTarget != null) {
-      final replyText = replyTarget is nc.TextMessage ? (replyTarget as nc.TextMessage).text ?? '' : '';
+      final replyText = replyTarget!.text;
       final snippet = replyText.length > 60 ? '${replyText.substring(0, 60)}…' : replyText;
       payload = '> Replying: "$snippet"\n$text';
     }
@@ -310,8 +438,10 @@ class _NativeChatState extends State<NativeChat> {
       reactions.putIfAbsent(messageId, () => {});
       reactions[messageId]![emoji] = (reactions[messageId]![emoji] ?? 0) + 1;
     });
-    // Send subtle reaction sync message
-    sendRawText('[React: $emoji to $messageId]');
+    _persistMessages();
+    if (connected) {
+      sendRawText('[React: $emoji to $messageId]');
+    }
   }
 
   Future<void> pickAndSendMedia(ImageSource source, {bool isVideo = false}) async {
@@ -519,7 +649,7 @@ class _NativeChatState extends State<NativeChat> {
     );
   }
 
-  void showMessageOptions(nc.Message m, String body, bool mine) {
+  void showMessageOptions(ChatMessageItem m, String body, bool mine) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -541,7 +671,7 @@ class _NativeChatState extends State<NativeChat> {
                       InkWell(
                         onTap: () {
                           Navigator.pop(ctx);
-                          if (m.messageId != null) addReaction(m.messageId!, e);
+                          if (m.messageId.isNotEmpty) addReaction(m.messageId, e);
                         },
                         borderRadius: BorderRadius.circular(16),
                         child: Padding(
@@ -597,15 +727,14 @@ class _NativeChatState extends State<NativeChat> {
 
     // Filter out internal reaction command messages from display
     final allList = messages.values
-        .where((m) => !(m is nc.TextMessage && m.text != null && m.text!.startsWith('[React:')))
+        .where((m) => !m.text.startsWith('[React:'))
         .toList()
-      ..sort((a, b) => (b.sentTime ?? 0).compareTo(a.sentTime ?? 0));
+      ..sort((a, b) => b.sentTime.compareTo(a.sentTime));
 
     final list = searchQuery.isEmpty
         ? allList
         : allList.where((m) {
-            final t = m is nc.TextMessage ? m.text?.toLowerCase() ?? '' : '';
-            return t.contains(searchQuery.toLowerCase());
+            return m.text.toLowerCase().contains(searchQuery.toLowerCase());
           }).toList();
 
     final peer = widget.session['peerName']?.toString() ?? widget.title;
@@ -743,12 +872,18 @@ class _NativeChatState extends State<NativeChat> {
                                   ? 'No messages matching "$searchQuery"'
                                   : connected && !paging
                                       ? 'No messages yet'
-                                      : 'Loading conversation…',
+                                      : messages.isNotEmpty
+                                          ? 'Saved messages loaded'
+                                          : 'No offline messages saved yet',
                               style: theme.textTheme.titleMedium,
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              connected ? 'Say hello and begin collaborating.' : 'Connecting to chat room…',
+                              connected
+                                  ? 'Say hello and begin collaborating.'
+                                  : messages.isNotEmpty
+                                      ? 'Viewing offline history from disk.'
+                                      : 'Connect to internet to start chatting.',
                               style: theme.textTheme.bodySmall?.copyWith(color: muted),
                             ),
                           ],
@@ -779,17 +914,16 @@ class _NativeChatState extends State<NativeChat> {
                           }
                           final m = list[i];
                           final mine = m.senderUserId == widget.session['userId'];
-                          final rawText = m is nc.TextMessage ? m.text ?? '' : '';
+                          final rawText = m.text;
                           final sender = mine
                               ? 'You'
-                              : m.userInfo?.name ?? widget.session['peerName'] ?? 'Member';
+                              : m.senderName ?? widget.session['peerName'] ?? 'Member';
 
                           final prev = i + 1 < list.length ? list[i + 1] : null;
-                          final showDate = m.sentTime != null &&
-                              m.sentTime! > 0 &&
+                          final showDate = m.sentTime > 0 &&
                               (prev == null || _isDifferentDay(m.sentTime, prev.sentTime));
 
-                          final msgReactions = m.messageId != null ? reactions[m.messageId!] : null;
+                          final msgReactions = reactions[m.messageId];
 
                           return Column(
                             mainAxisSize: MainAxisSize.min,
@@ -804,7 +938,7 @@ class _NativeChatState extends State<NativeChat> {
                                 reactions: msgReactions,
                                 onLongPress: () => showMessageOptions(m, rawText, mine),
                                 onReactionTap: (e) {
-                                  if (m.messageId != null) addReaction(m.messageId!, e);
+                                  if (m.messageId.isNotEmpty) addReaction(m.messageId, e);
                                 },
                               ),
                             ],
@@ -824,7 +958,7 @@ class _NativeChatState extends State<NativeChat> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Replying: ${replyTarget is nc.TextMessage ? (replyTarget as nc.TextMessage).text : "Message"}',
+                          'Replying: ${replyTarget!.text}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
@@ -838,6 +972,53 @@ class _NativeChatState extends State<NativeChat> {
                   ),
                 ),
               ],
+
+              // Offline status banner
+              if (!connected)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: ApexColors.amber.withValues(alpha: .12),
+                    border: Border(top: BorderSide(color: ApexColors.amber.withValues(alpha: .3))),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.cloud_off_rounded, size: 16, color: ApexColors.amber),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          messages.isNotEmpty
+                              ? 'Offline: Viewing saved messages on device'
+                              : 'Offline: Waiting for internet connection',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ApexColors.amber,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () {
+                          setState(() => status = 'Connecting…');
+                          connect();
+                        },
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          child: Text(
+                            'Retry',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ApexColors.coral,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               // Composer
               _ComposerV2(

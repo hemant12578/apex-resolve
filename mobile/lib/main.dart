@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'data.dart';
 import 'home.dart';
+import 'local_storage.dart';
 import 'session.dart';
 import 'sign_in.dart';
 import 'theme.dart';
@@ -88,22 +89,52 @@ class _SessionGateState extends State<SessionGate> {
       unavailable = false;
       signedIn = null;
     });
+
+    // 1. Restore local session from phone disk
+    await ApexSession.loadFromDisk();
+    final hasSession = ApexSession.name.isNotEmpty || ApexSession.email.isNotEmpty;
+    final cachedChats = await LocalVault.read('directory_chats');
+    if (hasSession || (cachedChats is List && cachedChats.isNotEmpty)) {
+      if (mounted) setState(() => signedIn = true);
+    }
+
+    // 2. Try online sync in background
     try {
       await loadDirectory('chats');
       if (mounted) setState(() => signedIn = true);
     } on PlatformException catch (e) {
       if (mounted) {
-        setState(() {
-          signedIn = false;
-          unavailable = e.code != 'SIGN_IN';
-        });
+        if (e.code == 'SIGN_IN') {
+          ApexSession.clear();
+          setState(() {
+            signedIn = false;
+            unavailable = false;
+          });
+        } else if (hasSession) {
+          setState(() {
+            signedIn = true;
+            unavailable = false;
+          });
+        } else {
+          setState(() {
+            signedIn = false;
+            unavailable = false;
+          });
+        }
       }
     } catch (_) {
       if (mounted) {
-        setState(() {
-          signedIn = false;
-          unavailable = true;
-        });
+        if (hasSession || (cachedChats is List && cachedChats.isNotEmpty)) {
+          setState(() {
+            signedIn = true;
+            unavailable = false;
+          });
+        } else {
+          setState(() {
+            signedIn = false;
+            unavailable = false;
+          });
+        }
       }
     }
   }

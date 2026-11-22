@@ -27,6 +27,11 @@ import WebKit
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if call.method == "getStorageDir" {
+      let urls = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+      result(urls.first?.path ?? "")
+      return
+    }
     if call.method == "logout" {
       let store = WKWebsiteDataStore.default().httpCookieStore
       store.getAllCookies { cookies in
