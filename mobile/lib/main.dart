@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:ai_nexconn_chat_plugin/ai_nexconn_chat_plugin.dart' as nc;
 import 'package:file_selector/file_selector.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -40,8 +41,80 @@ class ApexApp extends StatelessWidget {
         brightness: Brightness.dark,
       ),
     ),
-    home: Home(firebase: firebase),
+    home: SessionGate(firebase: firebase),
   );
+}
+
+class SessionGate extends StatefulWidget {
+  const SessionGate({super.key, required this.firebase});
+  final bool firebase;
+  @override
+  State<SessionGate> createState() => _SessionGateState();
+}
+
+class _SessionGateState extends State<SessionGate> {
+  bool checking = true, signedIn = false, unavailable = false;
+  @override
+  void initState() {
+    super.initState();
+    check();
+  }
+
+  Future<void> check() async {
+    setState(() {
+      checking = true;
+      unavailable = false;
+    });
+    try {
+      await const MethodChannel(
+        'apex/session',
+      ).invokeMethod<String>('directory', {'section': 'chats'});
+      signedIn = true;
+    } on PlatformException catch (error) {
+      unavailable = error.code != 'SIGN_IN';
+    } finally {
+      if (mounted) setState(() => checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (checking) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (unavailable) {
+      return Scaffold(
+        body: Center(
+          child: FilledButton(
+            onPressed: check,
+            child: const Text('Retry connection'),
+          ),
+        ),
+      );
+    }
+    if (signedIn) return Home(firebase: widget.firebase);
+    if (!widget.firebase && !Platform.isAndroid) {
+      return const Workspace(path: '/login', title: 'Sign in', firebase: false);
+    }
+    return SignIn(
+      onSuccess: (path) {
+        setState(() => signedIn = true);
+        if (path == '/welcome') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder:
+                  (_) => Workspace(
+                    path: path,
+                    title: 'Welcome',
+                    firebase: widget.firebase,
+                  ),
+            ),
+          );
+        }
+      },
+    );
+  }
 }
 
 class Home extends StatelessWidget {
@@ -168,41 +241,46 @@ class Home extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(18, 24, 18, 24),
         children: [
-          Row(
-            children: [
-              Icon(
-                Icons.layers_rounded,
-                size: 34,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                'Apex Resolve',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
+          Text(
+            'Apex Resolve',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           FilledButton.icon(
             onPressed: () => open(context, '/dashboard', 'Workspace'),
             icon: const Icon(Icons.dashboard_outlined),
             label: const Text('Open workspace'),
           ),
-          const SizedBox(height: 14),
-          for (final e in entries)
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 5,
+          const SizedBox(height: 20),
+          for (final (index, e) in entries.indexed)
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration:
+                  MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : Duration(milliseconds: 220 + index * 45),
+              curve: Curves.easeOutCubic,
+              builder:
+                  (_, v, child) => Opacity(
+                    opacity: v,
+                    child: Transform.translate(
+                      offset: Offset(0, 16 * (1 - v)),
+                      child: child,
+                    ),
+                  ),
+              child: Card(
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 6,
+                  ),
+                  leading: CircleAvatar(child: Icon(e.$1)),
+                  title: Text(e.$2),
+                  subtitle: Text(e.$3),
+                  onTap: () => open(context, e.$4, e.$2),
                 ),
-                leading: Icon(e.$1),
-                title: Text(e.$2),
-                subtitle: Text(e.$3),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => open(context, e.$4, e.$2),
               ),
             ),
         ],
@@ -236,6 +314,32 @@ class _WorkspaceState extends State<Workspace> {
     current = route(widget.path);
     web = WebViewController();
     configure();
+  }
+
+  bool redirecting = false;
+  bool interceptAuth(Uri uri) {
+    if (!widget.firebase && !Platform.isAndroid) return false;
+    if (!(uri.scheme == 'https' &&
+        ((isWorkspace(uri) &&
+                (uri.path == '/login' || uri.path == '/signup')) ||
+            uri.host == 'accounts.google.com'))) {
+      return false;
+    }
+    if (!redirecting && mounted) {
+      redirecting = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SessionGate(firebase: widget.firebase),
+            ),
+            (_) => false,
+          );
+        }
+      });
+    }
+    return true;
   }
 
   Future<void> configure() async {
@@ -289,7 +393,9 @@ class _WorkspaceState extends State<Workspace> {
       NavigationDelegate(
         onNavigationRequest: (request) async {
           final uri = Uri.tryParse(request.url);
-          if (uri == null) return NavigationDecision.prevent;
+          if (uri == null || (request.isMainFrame && interceptAuth(uri))) {
+            return NavigationDecision.prevent;
+          }
           if (uri.toString() == 'about:blank' ||
               (uri.scheme == 'https' && isWorkspace(uri))) {
             return NavigationDecision.navigate;
@@ -301,6 +407,7 @@ class _WorkspaceState extends State<Workspace> {
         },
         onUrlChange: (event) {
           final uri = Uri.tryParse(event.url ?? '');
+          if (uri != null && interceptAuth(uri)) return;
           if (mounted &&
               uri != null &&
               uri.scheme == 'https' &&

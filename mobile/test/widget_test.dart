@@ -1,16 +1,43 @@
 import 'package:app/main.dart';
 import 'package:app/workspace_routes.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   testWidgets('home exposes conversations and resolution workflows', (
     tester,
   ) async {
-    await tester.pumpWidget(const ApexApp());
+    const channel = MethodChannel('apex/session');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (_) async => '{"items":[]}');
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const ApexApp(firebase: true));
+    await tester.pumpAndSettle();
     expect(find.text('Messages'), findsOneWidget);
     expect(find.text('Communities'), findsOneWidget);
     expect(find.text('Resolution'), findsOneWidget);
   });
+  testWidgets(
+    'signed out opens native sign-in and account creation is explicit',
+    (tester) async {
+      const channel = MethodChannel('apex/session');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        channel,
+        (_) async => throw PlatformException(code: 'SIGN_IN'),
+      );
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      await tester.pumpWidget(const ApexApp(firebase: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Continue with Google'), findsOneWidget);
+      expect(find.text('Messages'), findsNothing);
+      await tester.tap(find.text('Create an account'));
+      await tester.pumpAndSettle();
+      expect(find.text('Create your account'), findsOneWidget);
+    },
+  );
   test(
     'only official workspace conversation URLs can request a native session',
     () {
