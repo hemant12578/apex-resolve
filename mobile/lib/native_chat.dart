@@ -934,7 +934,11 @@ class _NativeChatState extends State<NativeChat> {
                             );
                           }
                           final m = list[i];
-                          final mine = m.senderUserId == widget.session['userId'];
+                          final currentUserId = widget.session['userId']?.toString() ?? '';
+                          final peerUserId = widget.session['peerUserId']?.toString() ?? widget.session['peerId']?.toString() ?? '';
+                          final mine = m.senderUserId.isNotEmpty
+                              ? (m.senderUserId == currentUserId || (peerUserId.isNotEmpty && m.senderUserId != peerUserId))
+                              : false;
                           final rawText = m.text;
                           final sender = mine
                               ? 'You'
@@ -948,6 +952,7 @@ class _NativeChatState extends State<NativeChat> {
 
                           return Column(
                             mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               if (showDate) _DateBadge(label: chatDayLabel(m.sentTime)),
                               _ChatBubbleV2(
@@ -1133,15 +1138,18 @@ class _ChatBubbleV2 extends StatelessWidget {
     }
 
     if (isSticker) {
-      return Padding(
-        padding: EdgeInsets.only(
-          bottom: 8,
-          left: mine ? 48 : 0,
-          right: mine ? 0 : 48,
-        ),
-        child: Column(
-          crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
+      return Align(
+        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: 8,
+            left: mine ? 48 : 12,
+            right: mine ? 12 : 48,
+          ),
+          child: Column(
+            crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
             if (sender != null && !mine)
               Padding(
                 padding: const EdgeInsets.only(left: 6, bottom: 2),
@@ -1247,8 +1255,9 @@ class _ChatBubbleV2 extends StatelessWidget {
             ],
           ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
     final isMedia = rawText.startsWith('[Media:');
     String mediaType = '';
@@ -1280,15 +1289,22 @@ class _ChatBubbleV2 extends StatelessWidget {
       bottomRight: Radius.circular(mine ? 4 : 18),
     );
 
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: 6,
-        left: mine ? 48 : 0,
-        right: mine ? 0 : 48,
-      ),
-      child: Column(
-        crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-        children: [
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.78,
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: 6,
+            left: mine ? 24 : 12,
+            right: mine ? 12 : 24,
+          ),
+          child: Column(
+            crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
           if (sender != null && !mine)
             Padding(
               padding: const EdgeInsets.only(left: 6, bottom: 2),
@@ -1468,8 +1484,10 @@ class _ChatBubbleV2 extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
+    ),
+  ),
+);
+}
 
   static Color mutedColor(ThemeData theme) => theme.colorScheme.onSurfaceVariant;
 }
