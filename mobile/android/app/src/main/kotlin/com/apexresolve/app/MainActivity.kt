@@ -21,17 +21,22 @@ class MainActivity : FlutterActivity() {
                 }
                 return@setMethodCallHandler
             }
-            val path = when (call.method) {
-                "chat" -> "/api/chat/session"
+            val (path, httpMethod) = when (call.method) {
+                "chat" -> Pair("/api/chat/session", "POST")
                 "directory" -> {
                     val section = call.argument<String>("section")
                     if (section !in setOf("chats", "groups", "issues", "knowledge")) {
                         result.error("SECTION", "Unknown directory.", null)
                         return@setMethodCallHandler
                     }
-                    "/api/mobile/directory?section=$section"
+                    Pair("/api/mobile/directory?section=$section", "GET")
                 }
-                "login" -> "/api/auth/firebase"
+                "login" -> Pair("/api/auth/firebase", "POST")
+                "api" -> {
+                    val p = call.argument<String>("path") ?: ""
+                    val m = (call.argument<String>("method") ?: "GET").uppercase()
+                    Pair(p, m)
+                }
                 else -> { result.notImplemented(); return@setMethodCallHandler }
             }
             val arguments = call.arguments as? Map<*, *> ?: emptyMap<String, String>()
@@ -46,14 +51,17 @@ class MainActivity : FlutterActivity() {
                     val connection = URL(origin + path).openConnection() as HttpsURLConnection
                     try {
                         connection.instanceFollowRedirects = false
-                        connection.requestMethod = if (call.method == "directory") "GET" else "POST"
+                        connection.requestMethod = httpMethod
                         connection.connectTimeout = 15000
                         connection.readTimeout = 30000
-                        connection.doOutput = call.method != "directory"
+                        connection.doOutput = httpMethod != "GET"
                         connection.setRequestProperty("Origin", origin)
                         connection.setRequestProperty("Content-Type", "application/json")
                         if (cookies != null) connection.setRequestProperty("Cookie", cookies)
-                        if (connection.doOutput) connection.outputStream.use { it.write(JSONObject(arguments).toString().toByteArray(Charsets.UTF_8)) }
+                        if (connection.doOutput) {
+                            val payload = call.argument<Map<*, *>>("data") ?: arguments
+                            connection.outputStream.use { it.write(JSONObject(payload).toString().toByteArray(Charsets.UTF_8)) }
+                        }
                         val status = connection.responseCode
                         if (status == 401) {
                             runOnUiThread { result.error("SIGN_IN", "Sign in to your workspace.", null) }

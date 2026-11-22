@@ -2,7 +2,10 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'data.dart';
+import 'resolution_screens.dart';
+import 'user_discovery.dart';
 import 'ui.dart';
+import 'workspace_management.dart';
 
 class Directory extends StatefulWidget {
   const Directory({
@@ -97,9 +100,57 @@ class _DirectoryState extends State<Directory> {
     if (opening) return;
     setState(() => opening = true);
     try {
-      await widget.open(path, threadTitle: threadTitle);
+      if (path.startsWith('/issues/')) {
+        final id = path.replaceFirst('/issues/', '').split('#').first.split('?').first;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResolutionDetailScreen(
+              issueId: id,
+              initialTitle: threadTitle,
+            ),
+          ),
+        );
+      } else {
+        await widget.open(path, threadTitle: threadTitle);
+      }
     } finally {
       if (mounted) setState(() => opening = false);
+    }
+    if (mounted) await load();
+  }
+
+  String get actionPath => switch (widget.section) {
+    'chats' => '/communication?tab=people',
+    'groups' => '/communities/new',
+    'issues' => '/dashboard?view=resolution&create=issue#new-issue',
+    _ => '/knowledge',
+  };
+
+  Future<void> handleAction() async {
+    if (widget.section == 'chats') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const UserDiscoveryScreen()),
+      );
+    } else if (widget.section == 'groups') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const WorkspaceManagementScreen()),
+      );
+    } else if (widget.section == 'issues') {
+      final newId = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(builder: (_) => const CreateIssueScreen()),
+      );
+      if (newId != null && mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ResolutionDetailScreen(issueId: newId)),
+        );
+      }
+    } else {
+      await open(actionPath);
     }
     if (mounted) await load();
   }
@@ -330,7 +381,7 @@ class _DirectoryState extends State<Directory> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => open(path),
+        onPressed: handleAction,
         icon: Icon(actionIcon, size: 19),
         label: Text(action),
       ),

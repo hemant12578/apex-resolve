@@ -4,15 +4,20 @@ import 'package:ai_nexconn_chat_plugin/ai_nexconn_chat_plugin.dart' as nc;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'apex_ai_screen.dart';
 import 'data.dart';
 import 'directory.dart';
 import 'native_chat.dart';
+import 'profile_screen.dart';
+import 'resolution_screens.dart';
 import 'session.dart';
 import 'settings.dart';
 import 'sign_in.dart';
 import 'theme.dart';
 import 'ui.dart';
+import 'user_discovery.dart';
 import 'workspace.dart';
+import 'workspace_management.dart';
 import 'workspace_routes.dart';
 
 class Home extends StatefulWidget {
@@ -71,26 +76,112 @@ class _HomeState extends State<Home> {
   Future<void> open(String path, {String? threadTitle}) async {
     final title = threadTitle ?? 'Workspace';
     var destination = path;
+
+    // Check for issues path
+    if (destination.startsWith('/issues/')) {
+      final parts = destination.split('?').first.split('#').first.split('/');
+      if (parts.length >= 3 && parts[2].isNotEmpty) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResolutionDetailScreen(
+              issueId: parts[2],
+              initialTitle: title != 'Workspace' ? title : null,
+            ),
+          ),
+        );
+        if (mounted) await load();
+        return;
+      }
+    }
+
+    // Check for user discovery / people search
+    if (destination.contains('tab=people')) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const UserDiscoveryScreen()),
+      );
+      if (mounted) await load();
+      return;
+    }
+
+    // Check for community creation / management
+    if (destination == '/communities/new' || destination.startsWith('/workspaces')) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const WorkspaceManagementScreen()),
+      );
+      if (mounted) await load();
+      return;
+    }
+
+    // Check for issue creation
+    if (destination.contains('create=issue') || destination == '/issues/new') {
+      final newId = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(builder: (_) => const CreateIssueScreen()),
+      );
+      if (newId != null && mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ResolutionDetailScreen(issueId: newId)),
+        );
+        await load();
+      }
+      return;
+    }
+
+    // Check for settings
+    if (destination.startsWith('/settings')) {
+      await openSettings();
+      return;
+    }
+
+    // Check for Apex AI
+    if (destination == '/ai') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ApexAiScreen()),
+      );
+      return;
+    }
+
+    // Check for direct / community chat target
     final target = chatTarget(Uri.parse(workspaceOrigin).resolve(destination));
-    if (target != null && !target.containsKey('issueId')) {
+    if (target != null) {
+      if (target.containsKey('issueId')) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResolutionDetailScreen(
+              issueId: target['issueId']!,
+              initialTitle: title != 'Workspace' ? title : null,
+            ),
+          ),
+        );
+        if (mounted) await load();
+        return;
+      }
+
       try {
         final value = await const MethodChannel(
           'apex/session',
         ).invokeMethod<String>('chat', target);
         if (!mounted) return;
-        final details = await Navigator.push<bool>(
+        await Navigator.push<bool>(
           context,
           MaterialPageRoute(
             builder:
                 (_) => NativeChat(
                   session: jsonDecode(value!) as Map<String, dynamic>,
                   title: title,
-                  showWorkspace: true,
+                  showWorkspace: false,
                 ),
           ),
         );
         if (nc.NCEngine.isInitialized) await nc.NCEngine.disconnect();
-        if (!mounted || details != true) return;
+        if (mounted) await load();
+        return;
       } on PlatformException {
         if (!mounted) return;
       }
@@ -252,10 +343,19 @@ class _HomeState extends State<Home> {
               ),
             ),
             const SizedBox(width: 2),
-            ApexAvatar(
-              initials: initials(name),
-              seed: name,
-              size: 40,
+            GestureDetector(
+              onTap: () async {
+                final updated = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                );
+                if (updated == true && mounted) setState(() {});
+              },
+              child: ApexAvatar(
+                initials: initials(name),
+                seed: name,
+                size: 40,
+              ),
             ),
           ],
         ),
@@ -304,6 +404,81 @@ class _HomeState extends State<Home> {
                 'Resolution',
                 '/dashboard?view=resolution',
               ),
+        ),
+        const SizedBox(height: 14),
+        ApexCard(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          gradient: ApexGradients.surfaceGlow(theme.brightness),
+          borderColor: ApexColors.coral.withValues(alpha: .3),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: ApexGradients.primary,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Apex AI Copilot', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text('Troubleshoot issues & structure evidence', style: theme.textTheme.bodySmall?.copyWith(color: muted, fontSize: 11.5)),
+                  ],
+                ),
+              ),
+              FilledButton.tonal(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ApexAiScreen()),
+                  );
+                },
+                child: const Text('Ask AI'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const UserDiscoveryScreen()),
+                  );
+                },
+                icon: const Icon(Icons.person_search_outlined, size: 18),
+                label: const Text('Find People'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: () async {
+                  final nav = Navigator.of(context);
+                  final newId = await nav.push<String>(
+                    MaterialPageRoute(builder: (_) => const CreateIssueScreen()),
+                  );
+                  if (newId != null && mounted) {
+                    await nav.push(
+                      MaterialPageRoute(builder: (_) => ResolutionDetailScreen(issueId: newId)),
+                    );
+                    if (mounted) load();
+                  }
+                },
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('New Issue'),
+              ),
+            ),
+          ],
         ),
         if (signedOut) ...[
           const SizedBox(height: 14),
@@ -410,7 +585,7 @@ class _HomeState extends State<Home> {
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 9,
             crossAxisSpacing: 9,
-            childAspectRatio: 1.5,
+            childAspectRatio: 1.30,
             children: [
               _QuickAction(
                 icon: Icons.forum_outlined,
@@ -663,7 +838,7 @@ class _StatGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 9,
       crossAxisSpacing: 9,
-      childAspectRatio: 1.95,
+      childAspectRatio: 1.72,
       children: [
         _StatCard(
           label: 'Open',
@@ -709,10 +884,11 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ApexCard(
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -846,10 +1022,11 @@ class _QuickAction extends StatelessWidget {
     final theme = Theme.of(context);
     return ApexCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: 34,

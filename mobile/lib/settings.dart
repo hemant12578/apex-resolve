@@ -1,9 +1,11 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'profile_screen.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'ui.dart';
+import 'workspace_management.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -42,6 +44,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ApexSession.clear();
     ApexSession.expire();
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  Future<void> openProfile() async {
+    final updated = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    );
+    if (updated == true && mounted) setState(() {});
+  }
+
+  Future<void> openWorkspaces() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const WorkspaceManagementScreen()),
+    );
   }
 
   Future<void> openWorkspace() async {
@@ -116,12 +133,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 GestureDetector(
-                                  onTap: openWorkspace,
+                                  onTap: openProfile,
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Text(
-                                        'Edit on workspace',
+                                        'Edit profile',
                                         style: theme.textTheme.labelSmall
                                             ?.copyWith(
                                               color: ApexColors.coral,
@@ -131,7 +148,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       ),
                                       const SizedBox(width: 3),
                                       const Icon(
-                                        Icons.arrow_outward_rounded,
+                                        Icons.edit_outlined,
                                         size: 13,
                                         color: ApexColors.coral,
                                       ),
@@ -206,6 +223,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               height: 1.4,
                             ),
                           ),
+                          const Divider(height: 24),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.wallpaper_rounded,
+                                size: 18,
+                                color: theme.colorScheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Chat Wallpaper',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                widget.theme.wallpaper.label,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: muted,
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final style in ChatWallpaperStyle.values)
+                                ChoiceChip(
+                                  selected: widget.theme.wallpaper == style,
+                                  avatar: Icon(style.icon, size: 16),
+                                  label: Text(style.label, style: const TextStyle(fontSize: 12)),
+                                  onSelected: (_) => widget.theme.setWallpaper(style),
+                                ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -219,26 +275,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _SettingsTile(
                             icon: Icons.badge_outlined,
                             title: 'Account and profile',
-                            subtitle: 'Username, email and password',
-                            onTap: openWorkspace,
+                            subtitle: 'Display name, handle and avatar',
+                            onTap: openProfile,
                           ),
                           _SettingsTile(
-                            icon: Icons.face_retouching_natural_outlined,
-                            title: 'Chat identity',
-                            subtitle: 'How you appear in conversations',
-                            onTap: openWorkspace,
+                            icon: Icons.groups_rounded,
+                            title: 'Workspaces and Communities',
+                            subtitle: 'Manage teams and collaboration groups',
+                            onTap: openWorkspaces,
                           ),
                           _SettingsTile(
                             icon: Icons.notifications_none_rounded,
                             title: 'Notifications',
-                            subtitle: 'Alerts for reviews and replies',
-                            onTap: openWorkspace,
+                            subtitle: 'Alerts for reviews and replies (Active)',
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Notifications are active for reviews and direct chats.'),
+                                ),
+                              );
+                            },
                           ),
                           _SettingsTile(
                             icon: Icons.space_dashboard_outlined,
                             title: 'Home view',
-                            subtitle: 'Start in Communication or Resolution',
-                            onTap: openWorkspace,
+                            subtitle: 'Explorer cockpit with alerts first',
                             last: true,
                           ),
                         ],

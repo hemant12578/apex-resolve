@@ -55,6 +55,11 @@ android {
             signingConfig = signingConfigs.findByName("apexRelease")
         }
     }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 kotlin {

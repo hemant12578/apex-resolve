@@ -79,28 +79,70 @@ class ApexGradients {
     );
   }
 
-  static LinearGradient chatWallpaper(Brightness brightness) {
-    final dark = brightness == Brightness.dark;
-    return LinearGradient(
-      colors:
-          dark
+  static LinearGradient chatWallpaper(Brightness brightness, [ChatWallpaperStyle style = ChatWallpaperStyle.aurora]) {
+    switch (style) {
+      case ChatWallpaperStyle.midnight:
+        return const LinearGradient(
+          colors: [Color(0xFF070B12), Color(0xFF0C1322), Color(0xFF131D33)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        );
+      case ChatWallpaperStyle.slate:
+        return const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0F172A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        );
+      case ChatWallpaperStyle.paper:
+        return const LinearGradient(
+          colors: [Color(0xFFFAF6F0), Color(0xFFF4EDE4), Color(0xFFEBE2D7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        );
+      case ChatWallpaperStyle.aurora:
+        final dark = brightness == Brightness.dark;
+        return LinearGradient(
+          colors: dark
               ? [const Color(0xFF090E12), const Color(0xFF0C1216), const Color(0xFF101820)]
               : [const Color(0xFFF7F1EA), const Color(0xFFFBF4EC), const Color(0xFFF5EEE6)],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        );
+    }
   }
+}
+
+enum ChatWallpaperStyle {
+  aurora('Aurora Glow', Icons.flare_rounded),
+  midnight('Midnight Space', Icons.nights_stay_rounded),
+  slate('Technical Slate', Icons.grid_view_rounded),
+  paper('Warm Paper', Icons.description_outlined);
+
+  const ChatWallpaperStyle(this.label, this.icon);
+  final String label;
+  final IconData icon;
 }
 
 /// Session-scoped appearance controller. The choice applies immediately and is
 /// intentionally tucked into Settings instead of floating over creation flows.
 class ThemeController extends ChangeNotifier {
+  static final ThemeController global = ThemeController();
+
   ThemeMode _mode = ThemeMode.dark;
   ThemeMode get mode => _mode;
+
+  ChatWallpaperStyle _wallpaper = ChatWallpaperStyle.aurora;
+  ChatWallpaperStyle get wallpaper => _wallpaper;
 
   void setMode(ThemeMode mode) {
     if (_mode == mode) return;
     _mode = mode;
+    notifyListeners();
+  }
+
+  void setWallpaper(ChatWallpaperStyle style) {
+    if (_wallpaper == style) return;
+    _wallpaper = style;
     notifyListeners();
   }
 

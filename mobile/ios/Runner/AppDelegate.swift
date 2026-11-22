@@ -40,6 +40,7 @@ import WebKit
     }
     let args = call.arguments as? [String: Any] ?? [:]
     let path: String
+    var httpMethod = "POST"
     switch call.method {
     case "chat": path = "/api/chat/session"
     case "login": path = "/api/auth/firebase"
@@ -49,13 +50,21 @@ import WebKit
         return
       }
       path = "/api/mobile/directory?section=\(section)"
+      httpMethod = "GET"
+    case "api":
+      guard let p = args["path"] as? String else {
+        result(FlutterError(code: "PATH", message: "Missing path", details: nil))
+        return
+      }
+      path = p
+      httpMethod = ((args["method"] as? String) ?? "GET").uppercased()
     default: result(FlutterMethodNotImplemented); return
     }
     guard let url = URL(string: path, relativeTo: origin)?.absoluteURL else { return }
     let store = WKWebsiteDataStore.default().httpCookieStore
     store.getAllCookies { cookies in
       var request = URLRequest(url: url)
-      request.httpMethod = call.method == "directory" ? "GET" : "POST"
+      request.httpMethod = httpMethod
       request.setValue(self.origin.absoluteString, forHTTPHeaderField: "Origin")
       let scoped = cookies.filter {
         $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == self.origin.host &&
@@ -66,9 +75,10 @@ import WebKit
         return
       }
       for (key, value) in HTTPCookie.requestHeaderFields(with: scoped) { request.setValue(value, forHTTPHeaderField: key) }
-      if request.httpMethod == "POST" {
+      if httpMethod != "GET" {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: args)
+        let payload = (args["data"] as? [String: Any]) ?? args
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
       }
       self.session.dataTask(with: request) { data, response, _ in
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),

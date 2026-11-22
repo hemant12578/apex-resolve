@@ -136,9 +136,15 @@ class _MarkBar extends StatelessWidget {
 }
 
 class ApexBackground extends StatelessWidget {
-  const ApexBackground({super.key, required this.child, this.chat = false});
+  const ApexBackground({
+    super.key,
+    required this.child,
+    this.chat = false,
+    this.wallpaperStyle = ChatWallpaperStyle.aurora,
+  });
   final Widget child;
   final bool chat;
+  final ChatWallpaperStyle wallpaperStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -151,7 +157,7 @@ class ApexBackground extends StatelessWidget {
             decoration: BoxDecoration(
               gradient:
                   chat
-                      ? ApexGradients.chatWallpaper(theme.brightness)
+                      ? ApexGradients.chatWallpaper(theme.brightness, wallpaperStyle)
                       : LinearGradient(
                         colors: [
                           theme.scaffoldBackgroundColor,
