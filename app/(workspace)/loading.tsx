@@ -1,0 +1,1 @@
+export default function Loading(){return <section className="panel stack" role="status" aria-busy="true"><span>Loading workspace…</span><div className="skeleton"/><div className="skeleton"/><div className="skeleton"/></section>}

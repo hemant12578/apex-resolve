@@ -1,0 +1,264 @@
+import { after, before, test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readdir, readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { PGlite } from '@electric-sql/pglite'
+
+// Execute the shipped migration on PostgreSQL/WASM. These stubs model Supabase's
+// database roles, verified JWT subject, auth.users and Storage catalog only.
+let db
+const [admin, member, verifier, guest, outsider] = Array.from({length:5}, randomUUID)
+let workspace, issue, privateIssue
+async function as(user) {
+  await db.exec('reset role')
+  await db.query("select set_config('test.subject',$1,false)", [user])
+  await db.exec('set role authenticated')
+}
+async function scalar(sql, params = []) {
+  const result = await db.query(sql, params)
+  return Object.values(result.rows[0])[0]
+}
+const transition = (action, notes = '') => scalar("select transition_issue($1,$2,$3,'{}',verification_request_id) from issues where id=$1", [issue,action,notes])
+before(async () => {
+  db = new PGlite()
+  await db.exec(`
+    create role anon; create role authenticated; create role service_role bypassrls;
+    create schema auth; create schema storage;
+    grant usage on schema auth, storage to authenticated, anon;
+    create function auth.uid() returns uuid language sql stable as
+      $$select nullif(current_setting('test.subject',true),'')::uuid$$;
+    create table auth.users(id uuid primary key,raw_user_meta_data jsonb);
+    create table storage.buckets(id text primary key,name text, public boolean,file_size_limit bigint,allowed_mime_types text[]);
+    create table storage.objects(bucket_id text,name text,user_metadata jsonb);
+    alter table storage.objects enable row level security;
+    grant select,insert on storage.objects to authenticated;
+  `)
+  const migrations = new URL('../supabase/migrations/', import.meta.url)
+  for (const filename of (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort()) {
+    await db.exec(await readFile(new URL(filename, migrations), 'utf8'))
+  }
+  for(const u of [admin,member,verifier,guest,outsider]) await db.query('insert into auth.users(id) values($1)',[u])
+  await as(admin)
+  workspace = await scalar('select create_workspace($1,$2)', ['Checkout support','Support team'])
+  issue = await scalar('select create_issue($1,$2,$3,$4)',[workspace,'Checkout regression','Missing callback','high'])
+  privateIssue = await scalar('select create_issue($1,$2,$3,$4)',[workspace,'Internal deployment','Operations only','medium'])
+  for(const [role,user] of [['member',member],['verifier',verifier],['guest',guest]]) {
+    await as(admin)
+    const token = await scalar('select create_invitation($1,$2,$3)',[workspace,role,role==='guest'?issue:null])
+    await as(user)
+    assert.equal(await scalar('select accept_invitation($1)',[token]),workspace)
+    await assert.rejects(scalar('select accept_invitation($1)',[token]), /invalid or expired/)
+  }
+})
+after(async () => { await db?.close() })
+
+test('an outsider cannot read workspace, metadata or issues, or issue invitations',async () => {
+  await as(outsider)
+  for(const table of ['workspaces','issues','workspace_members','audit_events']) assert.equal(await scalar('select count(*)::int from '+table),0)
+  assert.equal(await scalar('select can_access_issue($1)',[issue]),false)
+  await assert.rejects(scalar("select create_invitation($1,'admin')",[workspace]),/admin required/)
+})
+test('guest has access to only the explicitly shared issue, and cannot create tasks',async () => {
+  await as(guest)
+  assert.equal(await scalar('select count(*)::int from issues'),1)
+  assert.equal(await scalar('select can_access_issue($1)',[privateIssue]),false)
+  assert.equal(await scalar('select count(*)::int from workspace_members'),1)
+  await assert.rejects(scalar("select save_task($1,'task','','TODO')",[issue]),/Team membership required/)
+})
+test('authenticated users cannot change protected rows directly and anonymous users cannot call RPCs',async () => {
+  await as(member)
+  await assert.rejects(db.query("update issues set status='VERIFIED_RESOLVED' where id=$1",[issue]),/permission denied/)
+  await assert.rejects(db.query('delete from audit_events'),/permission denied/)
+  await assert.rejects(db.query("insert into storage.objects values('evidence','fake','{}')"),/row-level security/)
+  await db.exec('reset role; set role anon')
+  await assert.rejects(scalar("select create_workspace('x','')"),/permission denied/)
+})
+test('tasks persist edits and completion and reject assignees from another workspace',async () => {
+  await as(member)
+  const task = await scalar("select save_task($1,'Check callback','Inspect logs','TODO',$2)",[issue,member])
+  await assert.rejects(scalar("select save_task($1,'Check callback','','DONE',$2,$3)",[issue,outsider,task]),/Assignee/)
+  await scalar("select save_task($1,'Check callback','','DONE',$2,$3)",[issue,member,task])
+  assert.equal(await scalar('select completed_at is not null from tasks where id=$1',[task]),true)
+  await scalar('select delete_task($1,$2)',[issue,task])
+  assert.equal(await scalar('select count(*)::int from tasks'),0)
+})
+test('verification enforces evidence, authorization and state, and atomically creates audit, outbox and knowledge',async () => {
+  await as(member)
+  await transition('start')
+  await assert.rejects(transition('request'),/Attach evidence/)
+  await as(guest)
+  await assert.rejects(scalar("select add_evidence($1,'file','log',$2)",[issue,issue+'/missing.log']),/Validated upload/)
+  await assert.rejects(scalar("select add_evidence($1,'url','log','javascript:alert(1)')",[issue]),/check constraint/)
+  await scalar("select add_evidence($1,'note','Callback replay passed')",[issue])
+  await as(member)
+  await transition('request')
+  await assert.rejects(transition('approve'),/Role cannot/)
+  await as(verifier)
+  await assert.rejects(transition('reject'),/reason is required/)
+  await transition('reject','Attach the staging replay')
+  assert.equal(await scalar('select status from issues where id=$1',[issue]),'IN_PROGRESS')
+  await as(member)
+  await transition('request')
+  await as(verifier)
+  await scalar("select transition_issue($1,'approve',$2,array['payments'],verification_request_id) from issues where id=$1",[issue,'Replay validated on staging'])
+  for (const keyword of ['replay','payments','checkout']) {
+    assert.equal(await scalar("select count(*)::int from knowledge_entries where search_vector @@ plainto_tsquery('simple',$1)",[keyword]),1)
+  }
+  await assert.rejects(transition('approve'),/Invalid issue transition/)
+  assert.equal(await scalar('select summary from knowledge_entries where issue_id=$1',[issue]),'Replay validated on staging')
+  assert.equal(await scalar("select count(*)::int from audit_events where issue_id=$1 and action='verification_approved' and actor_id=$2",[issue,verifier]),1)
+  await db.exec('reset role')
+  assert.equal(await scalar("select count(*)::int from outbox_events o join audit_events a using(id) where a.action='verification_approved'"),1)
+  await as(outsider)
+  assert.equal(await scalar('select count(*)::int from knowledge_entries'),0)
+  await as(admin)
+  await transition('reopen','Regressed in production')
+  assert.equal(await scalar('select count(*)::int from knowledge_entries'),0)
+  assert.equal(await scalar('select count(*)::int from resolution_verifications'),2)
+})
+test('private file evidence must match uploaded object, issue, evidence ID and uploader',async () => {
+ const id=randomUUID(), name=issue+'/'+id+'.txt'
+ await db.exec('reset role')
+ await db.query("insert into storage.objects values('evidence',$1,$2)",[name,JSON.stringify({uploader_id:member})])
+ await as(guest)
+ await assert.rejects(scalar("select add_evidence($1,'file','Verified log',$2,$3)",[issue,name,id]),/Validated upload/)
+ await as(member)
+ await scalar("select add_evidence($1,'file','Verified log',$2,$3)",[issue,name,id])
+ assert.equal(await scalar('select count(*)::int from storage.objects'),1)
+ await as(outsider)
+ assert.equal(await scalar('select count(*)::int from storage.objects'),0)
+})
+test('team role changes require an admin and preserve the owner and guest scope', async () => {
+  await as(member)
+  await assert.rejects(scalar("select set_member_role($1,$2,'verifier')",[workspace,member]), /admin required/)
+  await as(admin)
+  await assert.rejects(scalar("select set_member_role($1,$2,'member')",[workspace,admin]), /owner/)
+  await assert.rejects(scalar("select set_member_role($1,$2,'admin')",[workspace,guest]), /unavailable/)
+  await scalar("select set_member_role($1,$2,'verifier')",[workspace,member])
+  assert.equal(await scalar('select role from workspace_members where user_id=$1',[member]),'verifier')
+})
+test('provisioning retries create only one issue and one audit and outbox event', async () => {
+  const id=randomUUID()
+  await as(admin)
+  for(let i=0;i<2;i++) await scalar("select create_issue($1,'Callback retry','','high',null,$2)",[workspace,id])
+  assert.equal(await scalar('select count(*)::int from audit_events where issue_id=$1',[id]),1)
+  await db.exec('reset role; set role service_role')
+  assert.equal(await scalar('select count(*)::int from outbox_events where issue_id=$1',[id]),1)
+})
+test('only server workers can lease pending events or mint a chat-session allowance',async () => {
+  await as(member)
+  await assert.rejects(scalar('select take_chat_session($1)',[member]), /permission denied/)
+  await assert.rejects(db.query('select * from claim_chat_events($1,$2)',[issue,randomUUID()]), /permission denied/)
+  await db.exec('reset role; set role service_role')
+  for(let i=0;i<12;i++) assert.equal(await scalar('select take_chat_session($1)',[member]),true)
+  assert.equal(await scalar('select take_chat_session($1)',[member]),false)
+  await db.query('update issues set channel_id=$1 where id=$2',['channel-'+issue,issue])
+  const first=(await db.query('select * from claim_chat_events($1,$2)',[issue,randomUUID()])).rows
+  assert.ok(first.length>0)
+  const second=(await db.query('select * from claim_chat_events($1,$2)',[issue,randomUUID()])).rows
+  assert.ok(second.every(event=>!first.some(other=>other.event_id===event.event_id)))
+})
+test('AI reservations enforce workspace access, consent scope, daily count and spending limits with cached results',async () => {
+ const reserve = (user=member, hash='a', fallback=false, limit=3, budget=30) =>
+   scalar('select begin_ai_analysis($1,$2,$3,$4,$5,10,$6)',[user,issue,hash.repeat(64),limit,budget,fallback])
+ const finish = (id,provider,result,error=null) => scalar('select finish_ai_analysis($1,$2,$3,$4,$5,12,15)',[id,member,provider,result,error])
+ await as(member)
+ await assert.rejects(reserve(),/permission denied/)
+ await db.exec('reset role; set role service_role')
+ await assert.rejects(reserve(outsider),/Room access/)
+ const first=await reserve()
+ assert.equal(first.state,'reserved')
+ await assert.rejects(reserve(),/already in progress/)
+ const result={summary:'A callback failed',tasks:[{title:'Inspect timing',description:'Review the staging trace'}]}
+ await assert.rejects(finish(first.id,'openrouter',result),/consent/)
+ await finish(first.id,'gemini',result)
+ const cached=await reserve()
+ assert.equal(cached.id,first.id)
+ assert.deepEqual(cached.result,result)
+ const second=await reserve(member,'a',true)
+ assert.notEqual(first.id,second.id)
+ await finish(second.id,'openrouter',null,'provider_timeout')
+ await reserve(member,'b',false)
+ await assert.rejects(reserve(member,'c'),/Daily analysis limit/)
+ await assert.rejects(reserve(admin,'c'),/spending limit/)
+ await as(outsider)
+ assert.equal(await scalar('select count(*)::int from ai_analyses'),0)
+ await assert.rejects(scalar("select approve_ai_task($1,0,'A task','test')",[first.id]),/unavailable/)
+ await as(member)
+ const approve=()=>scalar("select approve_ai_task($1,0,'Review retry timeout','Edited by a human')",[first.id])
+ const task=await approve()
+ assert.equal(await approve(),task)
+ assert.equal(await scalar('select ai_generated from tasks where id=$1',[task]),true)
+ await assert.rejects(scalar("select approve_ai_task($1,-1,'bad','')",[first.id]),/unavailable/)
+ await scalar('select delete_task($1,$2)',[issue,task])
+ await assert.rejects(approve(),/deleted/)
+})
+test('chat context accepts only server callbacks, limits retention and honors replayed deletions', async () => {
+  const record=(channel,id,time,body)=>scalar('select record_room_message($1,$2,$3,$4)',[channel,id,time,body])
+  const channel='channel-'+issue
+  await as(member)
+  await assert.rejects(record(channel,'m0',100,'client'),/permission denied/)
+  await db.exec('reset role; set role service_role')
+  await record('unknown','m0',100,'unknown channel')
+  assert.equal(await scalar('select count(*)::int from room_context'),0)
+  for(let i=0;i<51;i++) await record(channel,'m'+i,100+i,'body '+i)
+  await record(channel,'m50',150,'replayed with different body')
+  assert.equal(await scalar("select body from room_context where message_id='m50'"),'body 50')
+  await record(channel,'m50',150,null)
+  await record(channel,'m50',150,'late create')
+  assert.equal(await scalar("select body from room_context where message_id='m50'"),null)
+  await as(member)
+  assert.equal(await scalar('select count(*)::int from room_context'),50)
+  assert.equal(await scalar("select count(*)::int from room_context where message_id='m0'"),0)
+  await as(outsider)
+  assert.equal(await scalar('select count(*)::int from room_context'),0)
+})
+
+test('private chats require the recipient PIN or an accepted request',async()=>{
+  const act=(peer,operation,pin='')=>scalar('select contact_action($1,$2,$3)',[peer,operation,pin])
+  await as(admin)
+  const pin=await scalar('select my_contact_pin()')
+  await as(member)
+  assert.equal(await act(admin,'pin','incorrect'),'invalid')
+  assert.equal(await act(admin,'request'),'pending')
+  await assert.rejects(act(admin,'accept'),/Request unavailable/)
+  await assert.rejects(db.query("update contact_requests set status='accepted'"),/permission denied/)
+  await as(admin)
+  assert.equal(await act(member,'decline'),'declined')
+  await as(member)
+  assert.equal(await act(admin,'request'),'declined')
+  assert.equal(await act(admin,'pin',pin),'accepted')
+  await as(verifier)
+  assert.equal(await scalar('select count(*)::int from contact_requests'),0)
+  assert.equal(await act(admin,'request'),'pending')
+  await as(admin)
+  assert.equal(await act(verifier,'accept'),'accepted')
+})
+
+test('independent review is bound to an authorized actor and a specific request', async()=>{
+  await as(admin)
+  const id=randomUUID()
+  await scalar("select file_issue($1,'Reported callback','Test case','high',$2,$3,'another',array[$4::uuid])",[workspace,member,id,verifier])
+  await as(member)
+  const act=(action,request=null)=>scalar("select transition_issue($1,$2,'reason','{}',$3)",[id,action,request])
+  await act('start')
+  await scalar("select add_evidence($1,'note','Replay evidence')",[id])
+  await as(verifier)
+  await act('request')
+  const token=()=>scalar('select verification_request_id from issues where id=$1',[id])
+  const first=await token()
+  await assert.rejects(act('approve',first),/independent reviewer/)
+  await act('withdraw',first)
+  await act('request')
+  const current=await token()
+  await as(member)
+  await assert.rejects(act('approve',current),/independent reviewer/)
+  await as(outsider)
+  await assert.rejects(act('approve',current),/Room access required/)
+  await as(admin)
+  await assert.rejects(act('approve',first),/request changed/)
+  assert.equal(await scalar('select status from issues where id=$1',[id]),'PENDING_VERIFICATION')
+  await act('approve',current)
+  await assert.rejects(act('approve',current),/Invalid issue transition/)
+  assert.equal(await scalar('select verifier_id from resolution_verifications where issue_id=$1 and request_id=$2',[id,current]),admin)
+})
