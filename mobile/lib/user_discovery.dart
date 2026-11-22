@@ -120,14 +120,22 @@ class _UserDiscoveryScreenState extends State<UserDiscoveryScreen> {
       final res = await ApexApiClient.contactAction(peer: peerId, operation: 'request');
       if (res['ok'] == true && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Message request sent to $name')),
+          SnackBar(
+            content: Text('Message request sent to $name'),
+            backgroundColor: ApexColors.green,
+          ),
         );
         loadUsers(searchCtrl.text.trim());
+      } else if (mounted) {
+        final errMsg = res['error']?.toString() ?? 'Could not send message request.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errMsg)),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not send message request.')),
+          const SnackBar(content: Text('Could not send message request. Check connection.')),
         );
       }
     }

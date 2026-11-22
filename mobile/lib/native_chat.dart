@@ -269,9 +269,26 @@ class _NativeChatState extends State<NativeChat> {
     );
   }
 
-  Future<void> connect() async {
+  Future<void> connect({bool refreshSession = false}) async {
     try {
-      final session = widget.session;
+      var session = widget.session;
+      if (refreshSession || session['token'] == null) {
+        try {
+          final peerId = session['peerId']?.toString();
+          final communityId = session['communityId']?.toString();
+          final issueId = session['issueId']?.toString();
+          final fresh = await ApexApiClient.chatSession(
+            peerId: peerId,
+            communityId: communityId,
+            issueId: issueId,
+          );
+          if (fresh['token'] != null && fresh['token'].toString().isNotEmpty) {
+            widget.session.addAll(fresh);
+            session = widget.session;
+          }
+        } catch (_) {}
+      }
+
       if (!nc.NCEngine.isInitialized) {
         await nc.NCEngine.initialize(
           nc.InitParams(
@@ -314,6 +331,10 @@ class _NativeChatState extends State<NativeChat> {
       });
       await loadHistory();
     } catch (_) {
+      // If initial connection failed and we haven't refreshed token yet, attempt one fresh token refresh
+      if (!refreshSession && mounted) {
+        return connect(refreshSession: true);
+      }
       if (mounted) {
         setState(() {
           connected = false;
@@ -1001,7 +1022,7 @@ class _NativeChatState extends State<NativeChat> {
                       InkWell(
                         onTap: () {
                           setState(() => status = 'Connecting…');
-                          connect();
+                          connect(refreshSession: true);
                         },
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(

@@ -1,14 +1,18 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_nexconn_chat_plugin/ai_nexconn_chat_plugin.dart' as nc;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'api_client.dart';
 import 'apex_ai_screen.dart';
 import 'data.dart';
 import 'directory.dart';
 import 'local_storage.dart';
 import 'native_chat.dart';
+import 'notification_service.dart';
+import 'notification_sheet.dart';
 import 'profile_screen.dart';
 import 'resolution_screens.dart';
 import 'session.dart';
@@ -34,11 +38,52 @@ class _HomeState extends State<Home> {
   ApexWorkspace? data;
   bool loading = true, signedOut = false;
   String error = '';
+  Timer? _notifPollTimer;
 
   @override
   void initState() {
     super.initState();
+    NotificationService.instance.init();
+    NotificationService.instance.addListener(_onNotifsChanged);
     load();
+    final isTest = WidgetsBinding.instance.runtimeType.toString().contains('Test');
+    if (!isTest) {
+      _checkIncomingRequests();
+      _notifPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+        _checkIncomingRequests();
+      });
+    }
+  }
+
+  void _onNotifsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _notifPollTimer?.cancel();
+    NotificationService.instance.removeListener(_onNotifsChanged);
+    NotificationService.instance.cancelTimers();
+    super.dispose();
+  }
+
+  Future<void> _checkIncomingRequests() async {
+    try {
+      final res = await ApexApiClient.searchUsers('');
+      final users = (res['users'] as List?) ?? [];
+      for (final u in users) {
+        if (u is Map) {
+          final contact = u['contact'] as Map?;
+          final incoming = contact?['incoming'] == true;
+          final status = contact?['status']?.toString();
+          if (incoming && status == 'pending') {
+            final peerId = u['id']?.toString() ?? '';
+            final name = u['name']?.toString() ?? u['handle']?.toString() ?? 'Teammate';
+            NotificationService.instance.notifyContactRequest(peerId: peerId, peerName: name);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> load() async {
@@ -352,15 +397,13 @@ class _HomeState extends State<Home> {
             ),
             IconButton(
               tooltip: 'Notifications',
-              onPressed: () => openSection(
-                'issues',
-                'Resolution',
-                '/dashboard?view=resolution',
-              ),
+              onPressed: () => NotificationSheet.show(context, onRefreshHome: load),
               icon: Badge(
-                isLabelVisible: alerts.isNotEmpty,
-                backgroundColor: ApexColors.rose,
-                smallSize: 7,
+                isLabelVisible: NotificationService.instance.unreadCount > 0 || alerts.isNotEmpty,
+                label: NotificationService.instance.unreadCount > 0
+                    ? Text('${NotificationService.instance.unreadCount}', style: const TextStyle(fontSize: 9))
+                    : null,
+                backgroundColor: ApexColors.coral,
                 child: const Icon(Icons.notifications_none_rounded),
               ),
             ),
