@@ -17,7 +17,15 @@
 
 <br/>
 
-**[🌐 Launch Live Web Application](https://apex-resolve-one.vercel.app)** • **[📱 Download Signed Android APK (56MB)](https://apex-resolve-one.vercel.app/submission/apex-resolve-android.apk)** • **[🎥 Watch 2-Minute Demo](https://apex-resolve-one.vercel.app/submission/index.html)** • **[📄 Read Technical Whitepaper (PDF)](https://apex-resolve-one.vercel.app/submission/writeup.pdf)** • **[🏆 Judge Scoring Matrix](docs/JUDGING_MATRIX.md)**
+**[🌐 Launch Live Web Application](https://apex-resolve-one.vercel.app)** • **[📲 Downloads Hub (Android & iOS)](https://apex-resolve-one.vercel.app/download)** • **[📱 Android APK](https://apex-resolve-one.vercel.app/downloads/apex-resolve.apk)** • **[🍏 iOS Simulator Bundle](https://apex-resolve-one.vercel.app/downloads/apex-resolve-ios.zip)** • **[🎥 Demo Video](https://apex-resolve-one.vercel.app/submission/index.html)** • **[🏆 Judge Scoring Matrix](docs/JUDGING_MATRIX.md)**
+
+<br/>
+
+> [!TIP]
+> **Judge & Reviewer Test Credentials (Instant Evaluation):**  
+> **Email:** `demo@apexresolve.com` | **Password:** `Password123!`  
+> *(Alternative: `test@apexresolve.com` | `Password123!`)*  
+> Pre-configured and verified for instant access on Web, Android APK, and iOS Simulator without email confirmation barriers.
 
 <br/>
 

@@ -16,5 +16,6 @@ firebase-debug.log*
 
 /public/submission/apex-resolve-android.apk
 *.apk
+public/downloads/
 apk-backup/
 mobile/apk_backups/

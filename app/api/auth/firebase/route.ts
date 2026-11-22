@@ -27,7 +27,7 @@ export async function POST(req:NextRequest){
       if(profileError)throw new Error('Could not save your username.');
     }
     const {error:sessionError}=await (await db()).auth.verifyOtp({token_hash:data.properties.hashed_token,type:'magiclink'});
-    if(sessionError)throw new Error('Could not start your data session.');
+    if(sessionError)throw new Error(sessionError.message || 'Could not start your data session.');
     const homeMode=data.user.user_metadata?.home_mode;
     return NextResponse.json({
       ok:true,
