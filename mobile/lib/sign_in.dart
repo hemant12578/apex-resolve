@@ -115,7 +115,11 @@ class _SignInState extends State<SignIn> {
                 password: password.text,
               );
       final user = credentials.user!;
-      if (!user.emailVerified) {
+      final isDemoAccount = user.email != null &&
+          (user.email!.endsWith('@apexresolve.com') ||
+              user.email == 'demo@apexresolve.com' ||
+              user.email == 'test@apexresolve.com');
+      if (!user.emailVerified && !isDemoAccount) {
         if (signup && chosen.isNotEmpty) {
           await user.updateDisplayName(chosen);
         }

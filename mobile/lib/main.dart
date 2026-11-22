@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -14,10 +16,37 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   bool firebase = false;
   try {
-    await Firebase.initializeApp();
+    if (Platform.isIOS) {
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: 'AIzaSyDVsh_-eT7ipC9XQci4xkHeLKMMVE_IfMI',
+          appId: '1:690636140447:ios:c99f4ef93d493ed02217aa',
+          messagingSenderId: '690636140447',
+          projectId: 'apex-resolve',
+          storageBucket: 'apex-resolve.firebasestorage.app',
+        ),
+      );
+    } else if (Platform.isAndroid) {
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: 'AIzaSyDVsh_-eT7ipC9XQci4xkHeLKMMVE_IfMI',
+          appId: '1:690636140447:android:c99f4ef93d493ed02217aa',
+          messagingSenderId: '690636140447',
+          projectId: 'apex-resolve',
+          storageBucket: 'apex-resolve.firebasestorage.app',
+        ),
+      );
+    } else {
+      await Firebase.initializeApp();
+    }
     firebase = true;
   } catch (_) {
-    /* Workspace email sign-in remains available. */
+    try {
+      await Firebase.initializeApp();
+      firebase = true;
+    } catch (_) {
+      /* Workspace email sign-in remains available. */
+    }
   }
   runApp(ApexApp(firebase: firebase));
 }
