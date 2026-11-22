@@ -278,11 +278,13 @@ class _WorkspaceState extends State<Workspace> {
           ) ??
           false;
     });
-    final android = web.platform as AndroidWebViewController;
-    await android.setOnShowFileSelector((params) async {
-      final file = await openFile();
-      return file == null ? [] : [Uri.file(file.path).toString()];
-    });
+    final android = web.platform;
+    if (android is AndroidWebViewController) {
+      await android.setOnShowFileSelector((params) async {
+        final file = await openFile();
+        return file == null ? [] : [Uri.file(file.path).toString()];
+      });
+    }
     await web.setNavigationDelegate(
       NavigationDelegate(
         onNavigationRequest: (request) async {
@@ -392,12 +394,12 @@ class _WorkspaceState extends State<Workspace> {
         actions: [
           if (widget.firebase &&
               (current.path == '/login' || current.path == '/signup'))
-            TextButton(onPressed: login, child: const Text('Android sign-in')),
+            TextButton(onPressed: login, child: const Text('App sign-in')),
           if (chatTarget(current) != null)
             TextButton.icon(
               onPressed: opening ? null : chat,
               icon: const Icon(Icons.chat_outlined),
-              label: const Text('Android chat'),
+              label: const Text('App chat'),
             ),
           IconButton(
             tooltip: 'Refresh',

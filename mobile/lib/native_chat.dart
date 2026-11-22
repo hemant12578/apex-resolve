@@ -23,7 +23,8 @@ class _NativeChatState extends State<NativeChat> {
   late final history = nc.MessagesQuery(
     nc.MessagesQueryParams(
       channelIdentifier: channel.channelIdentifier,
-      pageSize: 50,
+      pageSize: 20,
+      startTime: DateTime.now().millisecondsSinceEpoch,
     ),
   );
   bool connected = false, sending = false, paging = false;
@@ -105,6 +106,7 @@ class _NativeChatState extends State<NativeChat> {
       await history.loadNextPage((page, error) {
         if (done.isCompleted) return;
         if ((error?.code ?? 0) != 0) {
+          debugPrint('Chat history SDK status ${error?.code}');
           done.completeError(StateError('History unavailable'));
           return;
         }
