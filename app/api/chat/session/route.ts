@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { configured, db, storageAdmin } from '@/lib/db';
-import { chatConfig,openRoom,openDirect,openGroup } from '@/lib/nexconn';
+import { chatConfig,openRoom,openDirect,openGroup,dismissCommunity } from '@/lib/nexconn';
 
 function reply(body:object,status:number) {
   return NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});
@@ -21,11 +21,20 @@ export async function POST(request:Request) {
     const name=typeof user.user_metadata?.display_name==='string' ? user.user_metadata.display_name.trim() : '';
     if('communityId' in input.data){
       const id=input.data.communityId;
-      const access=await client.from('workspace_members').select('role,workspaces(name)').eq('workspace_id',id).eq('user_id',user.id).maybeSingle();
+      const access=await client.from('workspace_members').select('role,workspaces(name,community_state)').eq('workspace_id',id).eq('user_id',user.id).maybeSingle();
       if(access.error)throw new Error('Community unavailable.');
       if(!access.data || access.data.role==='guest')return reply({error:'Community membership required.'},403);
-      const group=access.data.workspaces;
-      return reply(await openGroup(user.id,'c'+id.replaceAll('-',''),(Array.isArray(group)?group[0]:group)?.name||'Community',name||'Member'),200);
+      const joined=access.data.workspaces;
+      const group=Array.isArray(joined)?joined[0]:joined;
+      if(group?.community_state!=='active')return reply({error:'This community is closed.'},410);
+      const result=await openGroup(user.id,'c'+id.replaceAll('-',''),group.name,name||'Member');
+      const latest=await client.from('workspaces').select('community_state').eq('id',id).single();
+      if(latest.error)throw new Error('Community unavailable.');
+      if(latest.data.community_state!=='active'){
+        await dismissCommunity(id);
+        return reply({error:'This community is closed.'},410);
+      }
+      return reply(result,200);
     }
     if('peerId' in input.data) {
       const peer=await storageAdmin().from('profiles').select('id,display_name').eq('id',input.data.peerId).maybeSingle();

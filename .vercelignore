@@ -7,3 +7,7 @@ playwright-report
 output/
 docs/qa/
 supabase/.temp/
+
+/mobile/
+docs/HACKATHON_AUDIT_2026-11-22.md
+firebase-debug.log*

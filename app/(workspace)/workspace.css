@@ -240,3 +240,21 @@ html[data-theme=white] .app-shell .sidebar nav a:is(:hover,[aria-current=page]),
 .issue-queue caption{text-align:left;color:var(--muted);margin-block:.6rem}
 .issue-queue th,.issue-queue td{border-bottom:1px solid var(--line);padding:.65rem}
 .issue-queue th{font-size:.82rem}
+
+.app-shell .room-chat .chat-compose {
+  display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end;
+  gap:.35rem .6rem; padding:.65rem; padding-bottom:max(.65rem,env(safe-area-inset-bottom));
+}
+.app-shell .room-chat .chat-compose textarea {width:100%; min-width:0; color:var(--text)}
+.app-shell .room-chat .chat-compose button {
+  grid-column:2; grid-row:1; display:inline-flex; justify-content:center; align-items:center;
+  gap:.4rem; width:auto; min-width:44px; min-height:44px; padding:0 .85rem; white-space:nowrap; border-radius:.85rem;
+}
+.app-shell .room-chat .compose-hint {grid-row:2; grid-column:1/-1}
+.group-roster li {flex-wrap:wrap}
+.group-roster .role-control {width:100%}
+.group-roster .role-control summary {font-size:.85rem;color:var(--accent)}
+html[data-theme="white"] .app-shell :is(textarea,input:not([type=checkbox]):not([type=radio]),select,option) {
+  background-color:#fff; color:#202626; border-color:#687271; color-scheme:light;
+}
+html[data-theme="white"] .app-shell :is(input,textarea)::placeholder {color:#566160;opacity:1}

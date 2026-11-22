@@ -11,3 +11,7 @@ playwright-report/
 
 supabase/.temp/
 docs/qa/*.png
+
+firebase-debug.log*
+
+/public/submission/apex-resolve-android.apk

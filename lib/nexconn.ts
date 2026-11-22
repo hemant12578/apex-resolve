@@ -41,14 +41,25 @@ async function ensureClosedGroup(channelId:string,title:string){
     }
 }
 
+export async function dismissCommunity(id:string) {
+  const channelId='c'+id.replaceAll('-','');
+  try {
+    await call('group-channel/dismiss',{channelId});
+  } catch {
+    // An unopened community or a retried dismissal can already be absent.
+    const result=await call('group-channel/profile/list',{channelIds:[channelId]});
+    const {profiles}=z.object({profiles:z.array(z.object({channelId:z.string()}))}).parse(result.result);
+    if(profiles.some(profile=>profile.channelId===channelId))throw new Error('Chat deletion is pending. Retry from Community info.');
+  }
+}
+
 export async function openDirect(sender:string,contactId:string,name:string) {
   return openGroup(sender,'d'+contactId.replaceAll('-',''),'Private conversation',name);
 }
 export async function openGroup(sender:string,channelId:string,title:string,name:string){
   const {region,appKey}=chatConfig();
   const userId=chatUserForProfile(sender);
-  await ensureClosedGroup(channelId,title);
-  const token=await issueToken(userId,name);
+  const [,token]=await Promise.all([ensureClosedGroup(channelId,title),issueToken(userId,name)]);
   await call('group-channel/join',{channelId,userIds:[userId]},[25412]);
   return {region,appKey,userId,channelId,token};
 }

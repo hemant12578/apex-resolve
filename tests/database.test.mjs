@@ -293,3 +293,13 @@ test('an admin cannot verify their own work, and a reviewer must retain their ro
   await act('approve',second)
   assert.equal(await scalar('select count(distinct request_id)::int from resolution_verifications where issue_id=$1',[id]),2)
 })
+
+test('existing workspaces have active chats and closing a chat preserves issues',async () => {
+  await as(member)
+  assert.equal(await scalar('select community_state from workspaces where id=$1',[workspace]),'active')
+  await assert.rejects(db.query("update workspaces set community_state='deleted' where id=$1",[workspace]), /permission denied/)
+  await db.exec('reset role')
+  await db.query("update workspaces set community_state='closing' where id=$1",[workspace])
+  await db.query("update workspaces set community_state='deleted' where id=$1",[workspace])
+  assert.equal(await scalar('select count(*)::int from issues where id=$1',[issue]),1)
+})

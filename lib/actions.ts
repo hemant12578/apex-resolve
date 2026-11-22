@@ -1,4 +1,5 @@
 'use server';
+import {dismissCommunity} from './nexconn';
 import {redirect} from 'next/navigation';
 import {headers} from 'next/headers';
 import {revalidatePath} from 'next/cache';
@@ -70,6 +71,20 @@ export async function mutate(f:FormData){
       if(op==='community')back='/communities/new';
       const id=await rpc('create_workspace',{p_name:title(f,100),p_description:description(f)});
       destination=(op==='community'?'/communities/':'/workspaces/')+id;
+    }else if(op==='deleteCommunity'){
+      const id=uid(f,'workspace');
+      back='/communities/'+id;
+      const workspaces=storageAdmin().from('workspaces');
+      const owner=await workspaces.select('community_state').eq('id',id).eq('owner_id',user.id).maybeSingle();
+      if(owner.error||!owner.data)throw new Error('Only the community owner can delete this group.');
+      if(owner.data.community_state!=='deleted'){
+        const closing=await workspaces.update({community_state:'closing'}).eq('id',id).eq('owner_id',user.id).in('community_state',['active','closing']).select('id').single();
+        if(closing.error)throw new Error('Could not start deletion. Reload the community and retry.');
+        await dismissCommunity(id);
+        const finished=await workspaces.update({community_state:'deleted'}).eq('id',id).eq('owner_id',user.id).eq('community_state','closing');
+        if(finished.error)throw new Error('Chat is closed. Retry to finish removing it from the directory.');
+      }
+      destination='/communication?tab=groups&notice=Community+deleted.';
     }else if(op==='profile'){
       back='/settings';await rpc('update_profile',{p_display_name:title(f,100)});
     }else if(['issue','invite','editWorkspace','role'].includes(op)){

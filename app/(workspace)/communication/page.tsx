@@ -25,7 +25,7 @@ export default async function Communication({searchParams}:{searchParams:Promise
   const term=q.trim().slice(0,100);
   const offset=(Math.max(1,Math.min(Number.parseInt(page||'1',10)||1,10000))-1)*pageSize;
   const chats=tab==='chats'||(!tab&&!room&&!peer&&!term.startsWith('@'));
-  const people=chats||tab==='people'||Boolean(peer)||term.startsWith('@');
+  const people=chats||tab==='people'||Boolean(peer)||(tab!=='groups'&&term.startsWith('@'));
   const section=chats?'chats':people?'people':tab==='groups'?'groups':'rooms';
   const communities=tab==='groups';
   const members:{id:string;display_name:string}[]=[];
@@ -52,7 +52,7 @@ export default async function Communication({searchParams}:{searchParams:Promise
   async function loadRooms(){
     if(people)return [];
     if(!communities)return rows(await query.range(offset,offset+pageSize));
-    let groups=client.from('workspaces').select('id,name,workspace_members!inner(role,user_id)').eq('workspace_members.user_id',user.id).neq('workspace_members.role','guest').order('name').order('id');
+    let groups=client.from('workspaces').select('id,name,workspace_members!inner(role,user_id)').eq('workspace_members.user_id',user.id).neq('workspace_members.role','guest').eq('community_state','active').order('name').order('id');
     if(term)groups=groups.ilike('name','%'+term.replace(/[\\%_]/g,'\\$&')+'%');
     return rows(await groups.range(offset,offset+pageSize)).map(group=>({id:group.id,title:group.name,status:'Group chat',updated_at:null,room_context:[]}));
   }
@@ -80,7 +80,7 @@ export default async function Communication({searchParams}:{searchParams:Promise
     <div className="conversation-hub" data-open={Boolean(peer||room||tab==='ai')}>
       <aside className="panel stack inbox-directory"><h2>Inbox</h2><nav className="inbox-tabs" aria-label="Inbox sections"><Link href="/communication?tab=chats" aria-current={chats?'page':undefined}>Direct</Link><Link href="/communication?tab=groups" aria-current={communities?'page':undefined}>Groups</Link><Link prefetch={true} aria-current={section==='rooms'?'page':undefined} href="/communication?tab=rooms"><Hash size={16}/> Rooms</Link><Link prefetch={true} aria-current={people&&!chats?'page':undefined} href="/communication?tab=people"><AtSign size={16}/> People</Link></nav>
       <form action="/communication" className="inbox-search"><input type="hidden" name="tab" value={section}/><input key={term} id="directory-search" type="search" aria-label="Search rooms or @username" name="q" defaultValue={term} placeholder={people?'Name or @username':communities?'Community name':'Room or @username'}/><button aria-label="Search"><SearchIcon size={17}/></button></form>
-      <ContactRequests/><nav aria-label="Conversations" className="conversation-list">{people?directory.slice(0,pageSize).map(m=><Link className="inbox-row" aria-current={peer===m.id?'page':undefined} href={link(current,m.id)} key={m.id}><b>{m.display_name.slice(0,1)}</b><span>{m.display_name}<small>{memberHandle(m.id,m.display_name)}</small></span></Link>):rooms.slice(0,pageSize).map(r=><Link className="inbox-row" aria-current={room===r.id?'page':undefined} href={communities?'/communities/'+r.id:link(current,r.id)} key={r.id}><b>#</b><span>{r.title}<small className="room-snippet">{r.room_context?.[0]?.body || r.status.replaceAll('_',' ').toLowerCase()}{r.updated_at && <> · <time dateTime={r.updated_at}>{new Date(r.updated_at).toLocaleDateString('en',{month:'short',day:'numeric',timeZone:'UTC'})}</time></>}</small></span></Link>)}</nav>
+      {people&&<ContactRequests/>}<nav aria-label="Conversations" className="conversation-list">{people?directory.slice(0,pageSize).map(m=><Link className="inbox-row" aria-current={peer===m.id?'page':undefined} href={link(current,m.id)} key={m.id}><b>{m.display_name.slice(0,1)}</b><span>{m.display_name}<small>{memberHandle(m.id,m.display_name)}</small></span></Link>):rooms.slice(0,pageSize).map(r=><Link className="inbox-row" aria-current={room===r.id?'page':undefined} href={communities?'/communities/'+r.id:link(current,r.id)} key={r.id}><b>#</b><span>{r.title}<small className="room-snippet">{r.room_context?.[0]?.body || r.status.replaceAll('_',' ').toLowerCase()}{r.updated_at && <> · <time dateTime={r.updated_at}>{new Date(r.updated_at).toLocaleDateString('en',{month:'short',day:'numeric',timeZone:'UTC'})}</time></>}</small></span></Link>)}</nav>
       {(people?!directory.length:!rooms.length)&&<p>{people&&term&&matchesMember(user.id,own?.display_name||'Member',term)?'Your profile matches. No other people matched this search.':term?'No matches. Try another search.':chats?'Approved conversations appear here. Find someone in People to start a chat.':people?'Teammates appear here when you share a workspace.':communities?'Your communities appear here.':'Your workspace issue rooms appear here.'}</p>}
       {current>1&&<Link href={link(current-1)}>Previous</Link>}{(people?directory.length:rooms.length)>pageSize&&<Link href={link(current+1)}>More results</Link>}
       <Link className="assistant-link" href="/communication?tab=ai">✦ Apex AI <span>Ask a question →</span></Link><footer className="directory-self"><strong>{own?.display_name||'Your profile'}</strong><small>{memberHandle(user.id,own?.display_name||"Member")}</small></footer></aside>
