@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'local_storage.dart';
@@ -8,6 +6,7 @@ enum NotificationType {
   contactRequest,
   resolutionReview,
   systemTip,
+  chatMessage,
 }
 
 class ApexNotification {
@@ -42,19 +41,22 @@ class ApexNotification {
     'isRead': isRead,
   };
 
-  factory ApexNotification.fromJson(Map<String, dynamic> json) => ApexNotification(
-    id: json['id'] as String? ?? UniqueKey().toString(),
-    title: json['title'] as String? ?? 'Notification',
-    body: json['body'] as String? ?? '',
-    type: NotificationType.values.firstWhere(
-      (e) => e.name == json['type'],
-      orElse: () => NotificationType.systemTip,
-    ),
-    timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
-    peerId: json['peerId'] as String?,
-    peerName: json['peerName'] as String?,
-    isRead: json['isRead'] as bool? ?? false,
-  );
+  factory ApexNotification.fromJson(Map<String, dynamic> json) =>
+      ApexNotification(
+        id: json['id'] as String? ?? UniqueKey().toString(),
+        title: json['title'] as String? ?? 'Notification',
+        body: json['body'] as String? ?? '',
+        type: NotificationType.values.firstWhere(
+          (e) => e.name == json['type'],
+          orElse: () => NotificationType.systemTip,
+        ),
+        timestamp:
+            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+            DateTime.now(),
+        peerId: json['peerId'] as String?,
+        peerName: json['peerName'] as String?,
+        isRead: json['isRead'] as bool? ?? false,
+      );
 }
 
 class NotificationService extends ChangeNotifier {
@@ -63,34 +65,10 @@ class NotificationService extends ChangeNotifier {
 
   static const _channel = MethodChannel('apex/session');
   final List<ApexNotification> _notifications = [];
-  Timer? _tipTimer;
   bool _initialized = false;
 
   List<ApexNotification> get notifications => List.unmodifiable(_notifications);
   int get unreadCount => _notifications.where((n) => !n.isRead).length;
-
-  static const List<Map<String, String>> _engagingTips = [
-    {
-      'title': '🔥 Team Momentum',
-      'body': 'Your workspace streak is active! Past resolutions are safely stored offline.',
-    },
-    {
-      'title': '⚡ Independent Review Ready',
-      'body': 'ProofGuard enforces separation of duties: teammates verify evidence before sign-off.',
-    },
-    {
-      'title': '💡 Quick 1-Click Feature',
-      'body': 'Tap any chat message in a room to instantly turn it into a trackable issue room.',
-    },
-    {
-      'title': '🛡️ Tamper-Evident Security',
-      'body': 'All chat events and evidence uploads have cryptographic audit trails.',
-    },
-    {
-      'title': '🚀 Nexconn Live Sync',
-      'body': 'Direct chats & community groups update across Web and Mobile with zero latency.',
-    },
-  ];
 
   Future<void> init() async {
     if (_initialized) return;
@@ -103,7 +81,9 @@ class NotificationService extends ChangeNotifier {
         _notifications.clear();
         for (final item in saved) {
           if (item is Map) {
-            _notifications.add(ApexNotification.fromJson(Map<String, dynamic>.from(item)));
+            _notifications.add(
+              ApexNotification.fromJson(Map<String, dynamic>.from(item)),
+            );
           }
         }
       }
@@ -118,31 +98,12 @@ class NotificationService extends ChangeNotifier {
     if (_notifications.isEmpty) {
       addNotification(
         title: '🎉 Welcome to Apex Resolve',
-        body: 'Connect with teammates, create community rooms, or resolve issues with verifiable proof.',
+        body:
+            'Connect with teammates, create community rooms, or resolve issues with verifiable proof.',
         type: NotificationType.systemTip,
         showSystemNotification: false,
       );
     }
-
-    // Schedule engaging tips every few minutes to keep users active (if not automated test)
-    _tipTimer?.cancel();
-    final isTest = WidgetsBinding.instance.runtimeType.toString().contains('Test');
-    if (!isTest) {
-      _tipTimer = Timer.periodic(const Duration(minutes: 7), (_) {
-        _postRandomEngagingTip();
-      });
-    }
-  }
-
-  void _postRandomEngagingTip() {
-    final rand = Random();
-    final tip = _engagingTips[rand.nextInt(_engagingTips.length)];
-    addNotification(
-      title: tip['title']!,
-      body: tip['body']!,
-      type: NotificationType.systemTip,
-      showSystemNotification: true,
-    );
   }
 
   Future<void> addNotification({
@@ -152,15 +113,19 @@ class NotificationService extends ChangeNotifier {
     String? peerId,
     String? peerName,
     bool showSystemNotification = true,
+    String? eventId,
   }) async {
-    // Avoid exact duplicate within last 5 minutes
-    final exists = _notifications.any(
-      (n) => n.title == title && n.body == body && DateTime.now().difference(n.timestamp).inMinutes < 5,
-    );
+    final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
+    final exists = _notifications.any((notification) {
+      if (eventId != null) return notification.id == eventId;
+      return notification.title == title &&
+          notification.body == body &&
+          notification.timestamp.isAfter(cutoff);
+    });
     if (exists) return;
 
     final notif = ApexNotification(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: eventId ?? DateTime.now().microsecondsSinceEpoch.toString(),
       title: title,
       body: body,
       type: type,
@@ -189,11 +154,14 @@ class NotificationService extends ChangeNotifier {
   void notifyContactRequest({
     required String peerId,
     required String peerName,
+    String? requestId,
   }) {
     addNotification(
       title: '💬 New Chat Request',
-      body: '$peerName sent you a chat request. Tap to accept and start messaging.',
+      body:
+          '$peerName sent you a chat request. Tap to accept and start messaging.',
       type: NotificationType.contactRequest,
+      eventId: requestId == null ? null : 'contact:$requestId',
       peerId: peerId,
       peerName: peerName,
       showSystemNotification: true,
@@ -228,16 +196,5 @@ class NotificationService extends ChangeNotifier {
       final list = _notifications.map((n) => n.toJson()).toList();
       await LocalVault.save('apex_notifications', list);
     } catch (_) {}
-  }
-
-  void cancelTimers() {
-    _tipTimer?.cancel();
-    _tipTimer = null;
-  }
-
-  @override
-  void dispose() {
-    cancelTimers();
-    super.dispose();
   }
 }

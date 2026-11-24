@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
 import 'local_storage.dart';
+import 'notification_service.dart';
 import 'resolution_screens.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -123,6 +124,7 @@ class _NativeChatState extends State<NativeChat> {
   final draft = TextEditingController();
   final searchCtrl = TextEditingController();
   final messages = <String, ChatMessageItem>{};
+  List<ChatMessageItem>? _visibleMessages;
   final reactions = <String, Map<String, int>>{}; // messageId -> {emoji: count}
 
   late final channel = nc.GroupChannel(widget.session['channelId'] as String);
@@ -192,9 +194,9 @@ class _NativeChatState extends State<NativeChat> {
           for (final item in cached) {
             if (item is Map) {
               final msg = ChatMessageItem.fromJson(Map<String, dynamic>.from(item));
-              if (msg.messageId.isNotEmpty) {
+              if (msg.messageId.isNotEmpty && !messages.containsKey(msg.messageId)) {
                 messages[msg.messageId] = msg;
-                _parseReactions(msg.text, msg.messageId);
+                _visibleMessages = null;
               }
             }
           }
@@ -204,6 +206,15 @@ class _NativeChatState extends State<NativeChat> {
         });
       }
     } catch (_) {}
+  }
+
+  Timer? _persistTimer;
+
+  void _schedulePersist() {
+    _persistTimer ??= Timer(const Duration(milliseconds: 500), () {
+      _persistTimer = null;
+      unawaited(_persistMessages());
+    });
   }
 
   Future<void> _persistMessages() async {
@@ -217,6 +228,10 @@ class _NativeChatState extends State<NativeChat> {
 
   @override
   void dispose() {
+    if (_persistTimer?.isActive == true) {
+      _persistTimer?.cancel();
+      unawaited(_persistMessages());
+    }
     ThemeController.global.removeListener(_onThemeChanged);
     nc.NCEngine.removeMessageHandler('apex.thread');
     draft.dispose();
@@ -305,8 +320,19 @@ class _NativeChatState extends State<NativeChat> {
         'apex.thread',
         nc.MessageHandler(
           onMessageReceived: (e) {
-            if (mounted && e.message.channelId == channel.channelIdentifier.channelId) {
-              setState(() => merge(e.message));
+            if (!mounted || e.message.channelId != channel.channelIdentifier.channelId) return;
+            final userId = widget.session['userId']?.toString() ?? '';
+            final item = ChatMessageItem.fromNcMessage(e.message, userId);
+            final newMessage = item.messageId.isNotEmpty && !messages.containsKey(item.messageId);
+            setState(() => merge(e.message));
+            if (newMessage && e.offline != true && item.senderUserId != userId &&
+                !item.text.startsWith('[React:')) {
+              unawaited(NotificationService.instance.addNotification(
+                title: widget.title,
+                body: 'You received a new message.',
+                type: NotificationType.chatMessage,
+                eventId: 'chat:${e.message.channelId}:${item.messageId}',
+              ));
             }
           },
         ),
@@ -349,10 +375,11 @@ class _NativeChatState extends State<NativeChat> {
   void merge(nc.Message message) {
     final currentUserId = widget.session['userId']?.toString() ?? '';
     final item = ChatMessageItem.fromNcMessage(message, currentUserId);
-    if (item.messageId.isNotEmpty) {
+    if (item.messageId.isNotEmpty && !messages.containsKey(item.messageId)) {
       messages[item.messageId] = item;
+      _visibleMessages = null;
       _parseReactions(item.text, item.messageId);
-      _persistMessages();
+      _schedulePersist();
     }
   }
 
@@ -372,12 +399,13 @@ class _NativeChatState extends State<NativeChat> {
             final currentUserId = widget.session['userId']?.toString() ?? '';
             for (final message in page?.data ?? <nc.Message>[]) {
               final item = ChatMessageItem.fromNcMessage(message, currentUserId);
-              if (item.messageId.isNotEmpty) {
+              if (item.messageId.isNotEmpty && !messages.containsKey(item.messageId)) {
                 messages[item.messageId] = item;
+                _visibleMessages = null;
                 _parseReactions(item.text, item.messageId);
               }
             }
-            _persistMessages();
+            _schedulePersist();
           });
         }
         done.complete();
@@ -459,7 +487,7 @@ class _NativeChatState extends State<NativeChat> {
       reactions.putIfAbsent(messageId, () => {});
       reactions[messageId]![emoji] = (reactions[messageId]![emoji] ?? 0) + 1;
     });
-    _persistMessages();
+    _schedulePersist();
     if (connected) {
       sendRawText('[React: $emoji to $messageId]');
     }
@@ -747,16 +775,15 @@ class _NativeChatState extends State<NativeChat> {
     final muted = theme.colorScheme.onSurfaceVariant;
 
     // Filter out internal reaction command messages from display
-    final allList = messages.values
+    final allList = _visibleMessages ??= (messages.values
         .where((m) => !m.text.startsWith('[React:'))
         .toList()
-      ..sort((a, b) => b.sentTime.compareTo(a.sentTime));
+      ..sort((a, b) => b.sentTime.compareTo(a.sentTime)));
+    final query = searchQuery.toLowerCase();
 
-    final list = searchQuery.isEmpty
+    final list = query.isEmpty
         ? allList
-        : allList.where((m) {
-            return m.text.toLowerCase().contains(searchQuery.toLowerCase());
-          }).toList();
+        : allList.where((m) => m.text.toLowerCase().contains(query)).toList();
 
     final peer = widget.session['peerName']?.toString() ?? widget.title;
     final group = widget.session.containsKey('communityId');

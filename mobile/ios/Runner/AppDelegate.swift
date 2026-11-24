@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import UserNotifications
 import WebKit
 
 @main
@@ -18,8 +19,21 @@ import WebKit
     completionHandler(nil)
   }
 
+  override func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    if notification.request.identifier.hasPrefix("apex-local-") {
+      completionHandler([.banner, .list, .sound])
+      return
+    }
+    super.userNotificationCenter(center, willPresent: notification, withCompletionHandler: completionHandler)
+  }
+
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    UNUserNotificationCenter.current().delegate = self
     let messenger = engineBridge.applicationRegistrar.messenger()
     FlutterMethodChannel(name: "apex/session", binaryMessenger: messenger).setMethodCallHandler {
       [weak self] call, result in self?.handle(call, result: result)
@@ -27,6 +41,32 @@ import WebKit
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if call.method == "requestNotificationPermission" {
+      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+        DispatchQueue.main.async { result(granted) }
+      }
+      return
+    }
+    if call.method == "showNotification" {
+      let args = call.arguments as? [String: Any] ?? [:]
+      let content = UNMutableNotificationContent()
+      content.title = args["title"] as? String ?? "Apex Resolve"
+      content.body = args["body"] as? String ?? ""
+      content.sound = .default
+      let id = (args["id"] as? NSNumber)?.stringValue ?? UUID().uuidString
+      UNUserNotificationCenter.current().add(
+        UNNotificationRequest(identifier: "apex-local-" + id, content: content, trigger: nil)
+      ) { error in
+        DispatchQueue.main.async {
+          if let error = error {
+            result(FlutterError(code: "NOTIFICATION", message: error.localizedDescription, details: nil))
+          } else {
+            result(true)
+          }
+        }
+      }
+      return
+    }
     if call.method == "getStorageDir" {
       let urls = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
       result(urls.first?.path ?? "")

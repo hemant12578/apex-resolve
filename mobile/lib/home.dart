@@ -39,6 +39,7 @@ class _HomeState extends State<Home> {
   bool loading = true, signedOut = false;
   String error = '';
   Timer? _notifPollTimer;
+  bool _checkingRequests = false;
 
   @override
   void initState() {
@@ -63,33 +64,44 @@ class _HomeState extends State<Home> {
   void dispose() {
     _notifPollTimer?.cancel();
     NotificationService.instance.removeListener(_onNotifsChanged);
-    NotificationService.instance.cancelTimers();
     super.dispose();
   }
 
   Future<void> _checkIncomingRequests() async {
+    if (_checkingRequests || !mounted) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    _checkingRequests = true;
     try {
       final res = await ApexApiClient.searchUsers('');
-      final users = (res['users'] as List?) ?? [];
+      final users = (res['items'] as List?) ?? [];
       for (final u in users) {
         if (u is Map) {
-          final contact = u['contact'] as Map?;
-          final incoming = contact?['incoming'] == true;
-          final status = contact?['status']?.toString();
+          final incoming = u['incoming'] == true;
+          final status = u['contactStatus']?.toString();
           if (incoming && status == 'pending') {
             final peerId = u['id']?.toString() ?? '';
-            final name = u['name']?.toString() ?? u['handle']?.toString() ?? 'Teammate';
-            NotificationService.instance.notifyContactRequest(peerId: peerId, peerName: name);
+            final name = u['displayName']?.toString() ?? u['handle']?.toString() ?? 'Teammate';
+            if (!mounted || peerId.isEmpty) continue;
+            NotificationService.instance.notifyContactRequest(
+              peerId: peerId,
+              peerName: name,
+              requestId: u['contactRequestId']?.toString(),
+            );
           }
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // A transient failure can be retried by the next poll.
+    } finally {
+      _checkingRequests = false;
+    }
   }
 
   Future<void> load() async {
     if (mounted) {
       setState(() {
-        loading = true;
+        loading = data == null;
         error = '';
         signedOut = false;
       });

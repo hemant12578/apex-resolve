@@ -5,6 +5,7 @@ import 'package:app/home.dart';
 import 'package:app/local_storage.dart';
 import 'package:app/main.dart';
 import 'package:app/native_chat.dart';
+import 'package:app/notification_service.dart';
 import 'package:app/profile_screen.dart';
 import 'package:app/resolution_screens.dart';
 import 'package:app/session.dart';
@@ -342,6 +343,39 @@ void main() {
 
     expect(find.text('Responsive Verification'), findsWidgets);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('distinct chat events send alerts and duplicate events do not', (
+    tester,
+  ) async {
+    const channel = MethodChannel('apex/session');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final alerts = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'showNotification') alerts.add(call);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final service = NotificationService.instance;
+    final prefix = 'qa-chat-${DateTime.now().microsecondsSinceEpoch}';
+    final eventIds = ['$prefix-one', '$prefix-two'];
+    addTearDown(() {
+      for (final id in eventIds) {
+        service.removeNotification(id);
+      }
+    });
+
+    for (final id in [...eventIds, eventIds.first]) {
+      await service.addNotification(
+        title: 'Team chat',
+        body: 'You received a new message.',
+        type: NotificationType.chatMessage,
+        eventId: id,
+      );
+    }
+
+    expect(alerts, hasLength(2));
   });
 
   test('Starter stickers list is populated and categorised', () {
